@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="assets/hero.svg" alt="Codex Rescue Hero" width="100%">
-</p>
-
-<p align="center">
   <a href="https://github.com/shleder/codex-rescue/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/shleder/codex-rescue/ci.yml?branch=main&style=flat-square&label=CI&logo=github" alt="CI Status"></a>
   <a href="https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha"><img src="https://img.shields.io/badge/version-v0.1.0--alpha-3fb950?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
