@@ -18,10 +18,11 @@ Every recovered fact is labeled with a confidence level: **VERIFIED**, **RECONST
 ## Install
 
 ```bash
-# Install from local source
-pip install .
-# or install globally from local repository
-pipx install .
+# Install directly from GitHub release tag
+pipx install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+
+# Or via pip
+pip install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
 ```
 
 Requires Python 3.11+.
@@ -39,7 +40,7 @@ codex-rescue verify <rescue-id>
 - 5 synthetic failure types diagnosed and recovered correctly
 - 2 real-origin sanitized cases (interrupted session, induced truncation)
 - Source rollout immutability verified via SHA-256 before/after
-- 41 automated tests pass, 1 skipped (real-session test requires live Codex)
+- 43 automated tests pass, 1 skipped (real-session test requires live Codex)
 - Git state verification detects HEAD, worktree, and diff divergence
 
 ### Validated Codex versions

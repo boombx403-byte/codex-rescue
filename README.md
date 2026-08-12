@@ -38,10 +38,11 @@ An unfinished action whose result is unknown is never automatically replayed.
 ## Quick start
 
 ```bash
-# Install from local directory
-pip install .
-# or install globally from local repository
-pipx install .
+# Install globally from GitHub
+pipx install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+
+# Or via pip
+pip install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
 
 # Find recent sessions
 codex-rescue sessions
