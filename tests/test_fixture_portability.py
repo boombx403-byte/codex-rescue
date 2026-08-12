@@ -1,39 +1,41 @@
 from __future__ import annotations
 
-import hashlib
 import unittest
 from pathlib import Path
 
-from codex_rescue.fixtures import _hash_tree_files, materialize_fixture_git_repo
+from codex_rescue.fixtures import materialize_fixture_git_repo, _hash_tree_files
 
-FIXTURES_ROOT = Path(__file__).resolve().parent.parent / "fixtures"
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 class FixturePortabilityTests(unittest.TestCase):
-    def test_all_fixtures_have_plain_snapshots(self) -> None:
-        fixture_dirs = [p for p in FIXTURES_ROOT.iterdir() if p.is_dir()]
-        self.assertGreaterEqual(len(fixture_dirs), 5)
-        for fix in fixture_dirs:
-            repo_before = fix / "repo_before"
-            repo_actual = fix / "repo_actual"
-            self.assertTrue(repo_before.exists(), f"repo_before missing in {fix.name}")
-            self.assertTrue(repo_actual.exists(), f"repo_actual missing in {fix.name}")
-            self.assertFalse((repo_before / ".git").exists(), f"repo_before contains .git in {fix.name}")
-            self.assertFalse((repo_actual / ".git").exists(), f"repo_actual contains .git in {fix.name}")
+    def test_fixtures_are_plain_snapshots_and_materialize_cleanly(self) -> None:
+        self.assertTrue(FIXTURES_DIR.exists(), "fixtures directory missing")
+        fixture_dirs = [d for d in FIXTURES_DIR.iterdir() if d.is_dir()]
+        self.assertGreaterEqual(len(fixture_dirs), 5, "Expected at least 5 fixtures")
 
-    def test_materialize_fixture_git_repo_lifecycle(self) -> None:
-        fix = FIXTURES_ROOT / "kill_apply_patch"
-        repo_actual = fix / "repo_actual"
-        hashes_before = _hash_tree_files(repo_actual)
+        for fixture in fixture_dirs:
+            repo_before = fixture / "repo_before"
+            repo_actual = fixture / "repo_actual"
 
-        with materialize_fixture_git_repo(fix):
-            git_dir = repo_actual / ".git"
-            self.assertTrue(git_dir.exists(), ".git missing during materialization context")
-            self.assertTrue(git_dir.is_dir(), ".git is not a directory")
+            self.assertTrue(repo_before.exists(), f"repo_before missing in {fixture.name}")
+            self.assertTrue(repo_actual.exists(), f"repo_actual missing in {fixture.name}")
 
-        self.assertFalse((repo_actual / ".git").exists(), ".git was not cleaned up after context exit")
-        hashes_after = _hash_tree_files(repo_actual)
-        self.assertEqual(hashes_before, hashes_after, "Snapshot file hashes changed after materialization")
+            # Verify no committed .git directories exist inside fixture snapshots
+            self.assertFalse((repo_before / ".git").exists(), f"repo_before contains .git in {fixture.name}")
+            self.assertFalse((repo_actual / ".git").exists(), f"repo_actual contains .git in {fixture.name}")
+
+            before_hashes = _hash_tree_files(repo_actual)
+
+            # Test runtime materialization context manager
+            with materialize_fixture_git_repo(fixture) as materialized_path:
+                self.assertEqual(materialized_path, repo_actual)
+                self.assertTrue((repo_actual / ".git").exists(), f"Runtime .git not materialized in {fixture.name}")
+
+            # Verify cleanup
+            self.assertFalse((repo_actual / ".git").exists(), f"Runtime .git not cleaned up in {fixture.name}")
+            after_hashes = _hash_tree_files(repo_actual)
+            self.assertEqual(before_hashes, after_hashes, f"repo_actual mutated after fixture {fixture.name}")
 
 
 if __name__ == "__main__":
