@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .doctor import doctor_session
+from .fixtures import materialize_fixture_git_repo
 from .salvage import salvage_session
 from .verify import verify_rescue
 
@@ -14,6 +15,8 @@ from .verify import verify_rescue
 def _hash_tree(path: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for file in sorted(item for item in path.rglob("*") if item.is_file()):
+        if ".git" in file.parts:
+            continue
         result[str(file.relative_to(path)).replace("\\", "/")] = hashlib.sha256(file.read_bytes()).hexdigest()
     return result
 
@@ -24,9 +27,12 @@ def run_fixture(fixture: Path, output_root: Path) -> dict[str, Any]:
     before = _hash_tree(fixture / "source_session")
     repo_before = _hash_tree(fixture / "repo_actual")
     started = time.perf_counter()
-    doctor = doctor_session(session)
-    salvage = salvage_session(session, doctor.transcript, doctor.status, doctor.findings, output_root, True)
-    verify = verify_rescue(output_root, salvage.rescue_id)
+
+    with materialize_fixture_git_repo(fixture):
+        doctor = doctor_session(session)
+        salvage = salvage_session(session, doctor.transcript, doctor.status, doctor.findings, output_root, True)
+        verify = verify_rescue(output_root, salvage.rescue_id)
+
     elapsed = time.perf_counter() - started
     after = _hash_tree(fixture / "source_session")
     original_untouched = before == after and salvage.original_untouched

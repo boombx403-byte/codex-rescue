@@ -17,8 +17,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       - uses: actions/setup-python@v5
         with:
@@ -39,5 +37,10 @@ jobs:
 
       - name: Run fixture harness
         run: python -m codex_rescue.harness fixtures --output .ci-fixtures
+        env:
+          PYTHONPATH: src
+
+      - name: Run alpha demo
+        run: python scripts/demo_alpha.py
         env:
           PYTHONPATH: src

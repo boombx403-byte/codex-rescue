@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import stat
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 def _line(record: dict[str, Any]) -> bytes:
@@ -15,6 +18,64 @@ def _line(record: dict[str, Any]) -> bytes:
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _remove_readonly(func: Any, path: str, _excinfo: Any) -> None:
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _remove_git_dir(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path, onerror=_remove_readonly)
+
+
+def _hash_tree_files(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for file in sorted(item for item in path.rglob("*") if item.is_file()):
+        if ".git" in file.parts:
+            continue
+        result[str(file.relative_to(path)).replace("\\", "/")] = hashlib.sha256(file.read_bytes()).hexdigest()
+    return result
+
+
+@contextmanager
+def materialize_fixture_git_repo(fixture: Path) -> Iterator[Path]:
+    repo_before = fixture / "repo_before"
+    repo_actual = fixture / "repo_actual"
+
+    assert repo_before.exists(), f"repo_before missing in {fixture}"
+    assert repo_actual.exists(), f"repo_actual missing in {fixture}"
+    assert not (repo_before / ".git").exists(), f"repo_before contains .git in {fixture}"
+    assert not (repo_actual / ".git").exists(), f"repo_actual contains .git in {fixture}"
+
+    actual_before_hashes = _hash_tree_files(repo_actual)
+
+    with tempfile.TemporaryDirectory(prefix="fixture-git-") as td:
+        baseline = Path(td) / "baseline"
+        shutil.copytree(repo_before, baseline)
+
+        _git(baseline, "init", "-q")
+        _git(baseline, "config", "user.name", "Codex Rescue Fixture")
+        _git(baseline, "config", "user.email", "fixture@example.invalid")
+        _git(baseline, "config", "core.autocrlf", "false")
+        _git(baseline, "add", "-A")
+
+        env = os.environ.copy()
+        env["GIT_AUTHOR_DATE"] = "2026-01-01T00:00:00Z"
+        env["GIT_COMMITTER_DATE"] = "2026-01-01T00:00:00Z"
+
+        subprocess.run(["git", "commit", "-qm", "fixture baseline"], cwd=baseline, env=env, check=True, capture_output=True)
+
+        git_dst = repo_actual / ".git"
+        shutil.copytree(baseline / ".git", git_dst)
+
+        try:
+            yield repo_actual
+        finally:
+            _remove_git_dir(git_dst)
+            actual_after_hashes = _hash_tree_files(repo_actual)
+            assert actual_after_hashes == actual_before_hashes, f"repo_actual files mutated in {fixture}"
 
 
 def _base_repo(path: Path) -> None:
@@ -38,11 +99,7 @@ def _meta(session_id: str, cwd: Path) -> dict[str, Any]:
 def generate_fixtures(root: str | Path) -> None:
     root = Path(root)
     if root.exists():
-        def remove_readonly(function, path, _excinfo):
-            os.chmod(path, stat.S_IWRITE)
-            function(path)
-
-        shutil.rmtree(root, onerror=remove_readonly)
+        shutil.rmtree(root, onerror=_remove_readonly)
     root.mkdir(parents=True)
 
     specs: list[tuple[str, str]] = [
@@ -92,6 +149,10 @@ def generate_fixtures(root: str | Path) -> None:
             f"# {name}\n\nSynthetic fixture matching the Codex 0.147.0 JSONL envelope. Expected primary class: `{expected}`.\n",
             encoding="utf-8",
         )
+
+        # Remove .git directories so generated fixtures are plain snapshots
+        _remove_git_dir(repo_before / ".git")
+        _remove_git_dir(repo_actual / ".git")
 
 
 if __name__ == "__main__":
