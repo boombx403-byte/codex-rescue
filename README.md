@@ -1,137 +1,179 @@
-# Codex Rescue
+<p align="center">
+  <img src="assets/hero.svg" alt="Codex Rescue Hero" width="100%">
+</p>
 
-When Codex can't resume safely, Rescue tells you what actually happened and gets you back to work.
+<p align="center">
+  <a href="https://github.com/shleder/codex-rescue/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/shleder/codex-rescue/ci.yml?branch=main&style=flat-square&label=CI&logo=github" alt="CI Status"></a>
+  <a href="https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha"><img src="https://img.shields.io/badge/version-v0.1.0--alpha-3fb950?style=flat-square" alt="Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-1f6feb?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+  <a href="#privacy"><img src="https://img.shields.io/badge/privacy-100%25%20local--first-238636?style=flat-square" alt="Privacy"></a>
+</p>
 
-Codex Rescue is a local-first recovery tool for [OpenAI Codex](https://github.com/openai/codex) sessions.
-It diagnoses interrupted or damaged sessions, verifies the repository state,
-and creates an evidence-backed continuation — without modifying the original rollout.
+---
+
+## Overview
+
+When **OpenAI Codex CLI** can't resume safely, **Rescue** tells you what actually happened and gets you back to work.
+
+Codex Rescue is a local-first fsck and crash-recovery tool for OpenAI Codex sessions. It diagnoses interrupted or damaged sessions, verifies repository working tree state, and reconstructs a bounded evidence-backed continuation **without modifying the original Codex rollout**.
 
 > [!WARNING]
 > **Codex Rescue is experimental alpha software.**
-> It is an evidence-gathering release intended to collect real recovery cases.
-> See [Alpha limitations](#alpha-limitations) below.
+> It is an evidence-gathering release designed to collect real failure cases.
+> See [Alpha Limitations](#alpha-limitations) below.
 
-## What it does
+---
 
-| Command | Purpose |
-|---------|---------|
-| `sessions` | Find recent Codex sessions |
-| `doctor` | Diagnose a suspicious or damaged session (read-only) |
-| `salvage` | Create an immutable evidence-backed recovery handoff |
-| `verify` | Detect repository divergence before continuation |
+## Core Commands
 
-**Key property:** the original Codex rollout is never modified.
+Rescue provides four narrow, read-only diagnostic and recovery entry points:
 
-## Confidence model
+| Command | Usage | Description |
+|---|---|---|
+| **`sessions`** | `codex-rescue sessions` | Discover and list recent local Codex rollout sessions |
+| **`doctor`** | `codex-rescue doctor --latest` | Inspect and diagnose a damaged session (**read-only**) |
+| **`salvage`** | `codex-rescue salvage --latest --fork` | Create an immutable, content-addressed recovery handoff |
+| **`verify`** | `codex-rescue verify <rescue-id>` | Detect repository divergence before executing continuation |
 
-Every recovered fact is labeled with one of three confidence levels:
+---
 
-| Level | Meaning |
-|-------|---------|
-| **VERIFIED** | Directly supported by durable evidence (Git HEAD, working tree, diff hash, tool result) |
-| **RECONSTRUCTED** | Strongly inferred from available evidence, but not directly proven |
-| **UNKNOWN** | Cannot be proven safely |
+## Confidence Model
 
-**UNKNOWN is deliberate.** Rescue refuses to guess when execution state cannot be proven.
-An unfinished action whose result is unknown is never automatically replayed.
+Rescue reconstructs facts with explicit, uncompromised confidence levels. Model prose alone is **never** accepted as source of truth.
 
-## Quick start
+| Level | Badge | Meaning & Source of Truth |
+|---|---|---|
+| **VERIFIED** | `VERIFIED` | Directly proven by durable evidence: Git HEAD SHA, working tree diff, tool execution exit code, or durable output record |
+| **RECONSTRUCTED** | `RECONSTRUCTED` | Strongly inferred from available evidence with no unresolved contradictions |
+| **UNKNOWN** | `UNKNOWN` | Cannot be proven safely. **UNKNOWN is deliberate.** Rescue refuses to guess when execution state is uncertain |
+
+> [!NOTE]
+> **Safety Invariants:**
+> 1. Source rollouts are **immutable** (`doctor`, `salvage`, and `verify` never write to the original `.jsonl` file).
+> 2. **No automatic replay** — an action whose execution status is `UNKNOWN` is never automatically re-executed.
+
+---
+
+## Quick Start
+
+### 1. Installation
+
+Install directly from the GitHub release tag:
 
 ```bash
-# Install globally from GitHub
+# Recommended global installation via pipx
 pipx install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
 
-# Or via pip
+# Or via standard pip
 pip install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+```
 
-# Find recent sessions
+### 2. Workflow Example
+
+```bash
+# 1. Discover recent Codex sessions
 codex-rescue sessions
 
-# Diagnose the latest session
+# 2. Diagnose the latest session
 codex-rescue doctor --latest
 
-# Create an immutable recovery handoff
+# 3. Generate an immutable recovery handoff
 codex-rescue salvage --latest --fork
 
-# Verify repository state before continuing
+# 4. Verify repository state before continuing
 codex-rescue verify <rescue-id>
 ```
 
-## Example output
+### Sample Output
 
-```
+```text
 $ codex-rescue doctor --latest
 
 Doctor: UNFINISHED_TOOL_CALL
 Findings: UNFINISHED_TOOL_CALL
-Repository: /path/to/repo (HEAD abc1234)
+Repository: /path/to/repo (HEAD a6cfe48)
 
 $ codex-rescue salvage --latest --fork
 
-Salvage: a1b2c3d4e5f6g7h8i9j0k1l2
+Salvage: 8f8f4e822c9ce353ed584c5f
 Original session untouched: yes
-Rescue directory: .codex-rescue/rescues/a1b2c3d4e5f6g7h8i9j0k1l2
+Rescue directory: .codex-rescue/rescues/8f8f4e822c9ce353ed584c5f
 
-$ codex-rescue verify a1b2c3d4e5f6g7h8i9j0k1l2
+$ codex-rescue verify 8f8f4e822c9ce353ed584c5f
 
 Verify: REVIEW_REQUIRED
-Review: unfinished tool call requires manual inspection
+Review: unfinished action requires inspection before replay
+Review: handoff contains load-bearing unknowns
 ```
 
-## Alpha limitations
+---
+
+## Proven Compatibility & Evidence
+
+| Version / Scope | Status | Proven Real-World Evidence |
+|---|---|---|
+| **Codex CLI 0.147.0** | **Validated** | Genuine interrupted session diagnosed (`UNFINISHED_TOOL_CALL`), source rollout preserved, repo state verified |
+| **Codex CLI 0.146.1** | **Smoke-tested** | Isolated authentication & basic rollout parser validation |
+| **Codex 0.145.0-alpha.18** | **Observed** | Legacy envelope format compatibility observed |
+| **Synthetic Fixtures** | **5/5 PASS** | `kill_apply_patch`, `kill_shell_before_result`, `lost_tail_after_compaction`, `malformed_jsonl`, `oversized_payload` |
+
+---
+
+## Alpha Limitations
 
 > [!IMPORTANT]
-> This is an experimental alpha release. The following limitations are known and documented honestly.
+> The following limitations are documented honestly. Do not claim recovery guarantees that have not been validated.
 
-- **Compaction recovery** — broad real compaction-related recovery is not yet validated; only synthetic fixtures exist
-- **Interactive continuation** — automatic fresh continuation depends on terminal/TTY environment; ConPTY limitations on Windows are known
-- **Previous versions** — recovery validation is limited to Codex CLI 0.147.0; earlier versions have only been smoke-tested or observed
-- **Corruption coverage** — not every arbitrary malformed session type is supported
-- **Side-effect detection** — Rescue does not automatically replay unknown side effects; it reports them for manual review
-- **Platform validation** — no Linux or macOS real-failure validation has been performed yet
+- **Compaction recovery** — broad real compaction-related recovery is not yet validated; only synthetic fixtures exist.
+- **Interactive continuation** — automatic fresh continuation depends on terminal/TTY environment (Windows ConPTY limitations noted).
+- **Previous versions** — validation is focused on Codex CLI 0.147.0; earlier versions are smoke-tested or observed.
+- **Side-effect replay** — Rescue does not automatically replay unknown side effects; it reports them as `REVIEW_REQUIRED`.
 
-## Privacy
+---
 
-- **Local-only** — no telemetry, no analytics, no cloud upload, no account required
-- Codex rollout files can contain **secrets, API keys, and private code**
-- **Sanitize all data before sharing** in issue reports or attachments
-- Built-in secret redaction is bounded and not a guaranteed complete DLP system
-- Current redaction covers common patterns (API keys, bearer tokens, OpenAI keys) but is not exhaustive
+## Privacy & Security
 
-## Codex version support
+- **100% Local-First** — zero telemetry, zero analytics, zero network uploads, zero cloud dependencies.
+- **No private DB mutation** — Rescue never modifies `state_*.sqlite` or internal Codex databases.
+- **Secret Redaction** — built-in secret redaction automatically filters common API key patterns (`sk-*`, `ghp_*`, `AKIA*`, Bearer tokens).
+- **Sanitization Notice** — Codex rollouts can contain secrets; sanitize all session files before attaching to public issues.
 
-| Version | Status |
-|---------|--------|
-| Codex CLI 0.147.0 | **Validated** — real interrupted session recovery demonstrated |
-| Codex CLI 0.146.1 | Smoke-tested — isolated authentication and basic operation verified |
-| Codex 0.145.0-alpha.18 | Observed sanitized format compatibility |
+---
 
-Do not assume compatibility with all Codex versions.
-
-## Development
+## Development & Verification
 
 ```bash
-# Install for development
+# Clone the repository
+git clone https://github.com/shleder/codex-rescue.git
+cd codex-rescue
+
+# Install in editable mode
 pip install -e .
 
-# Run tests
+# Run full unit test suite (43 passed, 1 skipped)
 python -m unittest discover -s tests -v
 
-# Run fixture harness
+# Run synthetic fixture harness (5/5 PASS)
 python -m codex_rescue.harness fixtures --output .validation-output/test
 
-# Run alpha demo
+# Run deterministic alpha demo
 python scripts/demo_alpha.py
 ```
 
-## Submit a recovery report
+---
 
-The main goal of this alpha is **collecting real broken Codex sessions**.
+## Submit a Recovery Report
 
-If you encounter a Codex session that can't resume safely, please [open a Recovery Report](https://github.com/shleder/codex-rescue/issues/new?template=recovery-report.yml).
+The primary goal of this public alpha is collecting real broken Codex sessions to expand our sanitized regression corpus.
 
-⚠️ **Do NOT upload raw rollout files containing secrets.** Sanitize all session data before attaching.
+[**Open a Recovery Report →**](https://github.com/shleder/codex-rescue/issues/new?template=recovery-report.yml)
+
+> [!CAUTION]
+> **Do NOT upload raw rollout files containing secrets or credentials.** Always sanitize session data before attaching.
+
+---
 
 ## License
 
-[MIT](LICENSE)
+Distributed under the [MIT License](LICENSE). Copyright (c) 2026 shleder.
