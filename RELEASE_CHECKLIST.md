@@ -17,6 +17,7 @@
 - [x] synthetic fixtures 5/5 pass
 - [x] sanitized real-origin regression cases pass
 - [x] source SHA-256 unchanged in demo
+- [x] clean clone fixture portability verified
 
 ## Privacy
 - [x] no raw private rollouts committed
@@ -31,7 +32,7 @@
 - [x] CHANGELOG.md
 - [x] issue templates
 - [x] pull request template
-- [ ] CI workflow (prepared locally; awaiting remote GitHub CI run)
+- [x] CI workflow (remote GitHub Actions CI verified green across Windows & Ubuntu x Python 3.11, 3.12, 3.13)
 - [x] release notes
 
 ## Claims
