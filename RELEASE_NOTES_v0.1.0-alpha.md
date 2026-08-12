@@ -18,11 +18,11 @@ Every recovered fact is labeled with a confidence level: **VERIFIED**, **RECONST
 ## Install
 
 ```bash
-# Install directly from GitHub release tag
-pipx install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+# Recommended global installation via pipx
+pipx install codex-rescue
 
 # Or via pip
-pip install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+pip install codex-rescue
 ```
 
 Requires Python 3.11+.

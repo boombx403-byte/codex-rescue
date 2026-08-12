@@ -55,14 +55,14 @@ Rescue reconstructs facts with explicit, uncompromised confidence levels. Model 
 
 ### 1. Installation
 
-Install directly from the GitHub release tag:
+Install directly from PyPI:
 
 ```bash
 # Recommended global installation via pipx
-pipx install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+pipx install codex-rescue
 
 # Or via standard pip
-pip install git+https://github.com/shleder/codex-rescue.git@v0.1.0-alpha
+pip install codex-rescue
 ```
 
 ### 2. Workflow Example
