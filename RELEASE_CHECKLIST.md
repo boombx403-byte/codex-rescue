@@ -32,7 +32,8 @@
 - [x] CHANGELOG.md
 - [x] issue templates
 - [x] pull request template
-- [x] CI workflow (remote GitHub Actions CI verified green across Windows & Ubuntu x Python 3.11, 3.12, 3.13)
+- [x] CI workflow (verified green across Windows/Ubuntu x Python 3.11/3.12/3.13)
+- [x] clean public clone fixture portability verified
 - [x] release notes
 
 ## Claims
