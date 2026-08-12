@@ -1,0 +1,66 @@
+name: Bug Report
+description: Report a bug in Codex Rescue
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: rescue-version
+    attributes:
+      label: Codex Rescue version
+      description: Output of `codex-rescue --version`
+      placeholder: "0.1.0-alpha"
+    validations:
+      required: true
+
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex CLI version
+      placeholder: "0.147.0"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command that triggered the bug
+      placeholder: "codex-rescue doctor --latest"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      render: text
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction steps
+      description: |
+        Do NOT include raw Codex rollout files containing secrets.
+        Sanitize any session data before attaching.

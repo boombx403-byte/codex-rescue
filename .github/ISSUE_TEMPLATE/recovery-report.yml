@@ -1,0 +1,102 @@
+name: Recovery Report
+description: Report a real Codex session recovery attempt
+title: "[Recovery] "
+labels: ["recovery-report", "alpha-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ Privacy Warning
+        
+        **Do NOT upload raw Codex rollout files containing secrets, API keys, or private prompts.**
+        Sanitize all session data before attaching anything.
+        Codex rollout files can contain credentials, tokens, and sensitive code.
+
+  - type: input
+    id: rescue-version
+    attributes:
+      label: Codex Rescue version
+      description: Output of `codex-rescue --version`
+      placeholder: "0.1.0-alpha"
+    validations:
+      required: true
+
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex CLI version
+      description: Output of `codex --version`
+      placeholder: "0.147.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened to the Codex session?
+      description: Describe how the session was interrupted or became damaged.
+      placeholder: "Codex was running a shell command when the process was killed..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: native-resume
+    attributes:
+      label: Native Codex resume result
+      description: Did you try `codex resume` or `codex --resume`? What happened?
+      placeholder: "codex resume failed with..."
+
+  - type: textarea
+    id: doctor-output
+    attributes:
+      label: Doctor output
+      description: Output of `codex-rescue doctor --latest --json`
+      render: json
+
+  - type: textarea
+    id: verify-output
+    attributes:
+      label: Verify output
+      description: Output of `codex-rescue verify <rescue-id> --json`
+      render: json
+
+  - type: dropdown
+    id: side-effects
+    attributes:
+      label: Were side effects possible?
+      description: Could the interrupted action have modified files, run commands, or made network requests?
+      options:
+        - "Yes - side effects may have occurred"
+        - "No - the action was read-only"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source-unchanged
+    attributes:
+      label: Was the original rollout unchanged?
+      description: Did Rescue leave the original Codex session file unmodified?
+      options:
+        - "Yes - original rollout unchanged"
+        - "No - original rollout was modified (this is a bug)"
+        - "Did not check"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized reproduction or fixture
+      description: If possible, provide a sanitized fixture or reproduction steps. Remove all secrets, private prompts, and credentials.

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: pip install .
+
+      - name: CLI smoke test
+        run: |
+          codex-rescue --version
+          codex-rescue --help
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+
+      - name: Run fixture harness
+        run: python -m codex_rescue.harness fixtures --output .ci-fixtures
+        env:
+          PYTHONPATH: src
