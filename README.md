@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/shleder/codex-rescue/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/shleder/codex-rescue/ci.yml?branch=main&style=flat-square&label=CI&logo=github" alt="CI Status"></a>
-  <img src="https://img.shields.io/badge/version-v0.1.0--alpha.2-3fb950?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v0.1.0--alpha.3-3fb950?style=flat-square" alt="Version">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-1f6feb?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <a href="#privacy"><img src="https://img.shields.io/badge/privacy-100%25%20local--first-238636?style=flat-square" alt="Privacy"></a>
@@ -33,6 +33,14 @@ rescue root.
 | **`doctor`** | `codex-rescue doctor --latest` | Inspect and diagnose a damaged session (**read-only**) |
 | **`salvage`** | `codex-rescue salvage --latest --fork` | Create an immutable, content-addressed recovery handoff |
 | **`verify`** | `codex-rescue verify <rescue-id>` | Detect repository divergence before executing continuation |
+
+When a persisted `function_call.name` contains NUL or another ASCII control
+character, `doctor` reports `CORRUPTED_TOOL_CALL` and keeps only bounded
+metadata (call id, family, length, codepoints, and a hash) for manual review.
+The original rollout remains untouched. Rescue does not infer or automatically
+repair the intended tool name, repair Codex HTTP 400 responses, repair
+arbitrary malformed arguments, or replay the corrupted call; `verify` remains
+fail-closed with `REVIEW_REQUIRED`.
 
 ---
 
@@ -151,7 +159,8 @@ Review: handoff contains load-bearing unknowns
 | **Codex CLI 0.147.0** | **Validated** | Genuine interrupted session diagnosed (`UNFINISHED_TOOL_CALL`), source rollout preserved, repo state verified |
 | **Codex CLI 0.146.1** | **Smoke-tested** | Isolated authentication & basic rollout parser validation |
 | **Codex 0.145.0-alpha.18** | **Observed** | Legacy envelope format compatibility observed |
-| **Synthetic Fixtures** | **5/5 PASS** | `kill_apply_patch`, `kill_shell_before_result`, `lost_tail_after_compaction`, `malformed_jsonl`, `oversized_payload` |
+| **Synthetic Fixtures** | **6/6 PASS** | `kill_apply_patch`, `kill_shell_before_result`, `lost_tail_after_compaction`, `malformed_jsonl`, `oversized_payload`, `issue_14824_orphaned_tool_output` |
+| **Public real-case regressions** | **Validated** | #14824 orphaned/missing tool output, #37719 oversized persisted tool output, #24369 corrupted persisted tool-call name |
 
 ---
 

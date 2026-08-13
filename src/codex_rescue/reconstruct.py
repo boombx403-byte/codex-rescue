@@ -12,6 +12,7 @@ from .gitstate import GitState
 
 
 CONFIDENCE = {"verified", "reconstructed", "unknown"}
+_CORRUPTED_TOOL_NAME_SENTINEL = "<corrupted-tool-name>"
 
 
 _SECRET_PATTERNS = (
@@ -69,6 +70,14 @@ def _event_type(event: Any) -> str | None:
 
 def _events(parsed: Any) -> Iterable[Any]:
     return _get(parsed, "events", ()) or _get(parsed, "operational_events", ()) or ()
+
+
+def _safe_tool_name(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+        return _CORRUPTED_TOOL_NAME_SENTINEL
+    return value
 
 
 def build_handoff(
@@ -135,11 +144,17 @@ def build_handoff(
     unfinished_items: list[dict[str, Any]] = []
     for raw_item in unfinished[:20]:
         item = raw_item if isinstance(raw_item, dict) else getattr(raw_item, "__dict__", {"value": str(raw_item)})
+        safe_item = dict(item)
+        if "tool_name" in safe_item:
+            safe_item["tool_name"] = _safe_tool_name(safe_item.get("tool_name"))
+        if "type" in safe_item:
+            safe_item["type"] = _safe_tool_name(safe_item.get("type"))
+        safe_type = _safe_tool_name(item.get("tool_name") or item.get("type") or "tool_call")
         unfinished_items.append(
             {
                 "call_id": item.get("call_id"),
-                "type": item.get("tool_name") or item.get("type") or "tool_call",
-                "command_or_args_ref": _bounded(item.get("command") or item.get("arguments") or item, 300),
+                "type": safe_type,
+                "command_or_args_ref": _bounded(item.get("command") or item.get("arguments") or safe_item, 300),
                 "status": "unknown",
                 "confidence": "unknown",
                 "evidence_refs": [evidence("transcript", str(item.get("offset", "tail")), "call has no durable completion")],
@@ -159,6 +174,7 @@ def build_handoff(
         "compacted": bool(_get(parsed, "compacted", False)),
         "compaction_state_loss": bool(_get(parsed, "compaction_state_loss", False)),
         "compaction_loss_evidence": list(_get(parsed, "compaction_loss_evidence", ()) or ()),
+        "corrupted_tool_calls": list(_get(parsed, "corrupted_tool_calls", ()) or ()),
         "correlation_ambiguities": list(_get(parsed, "correlation_ambiguities", ()) or ()),
         "operational_schema_issues": list(_get(parsed, "operational_schema_issues", ()) or ()),
         "corruption_class": doctor_status,
@@ -193,10 +209,11 @@ def build_handoff(
         or git_state is None
         or bool(_get(parsed, "compacted", False))
         or bool(_get(parsed, "compaction_state_loss", False))
+        or bool(_get(parsed, "corrupted_tool_calls", ()))
         or bool(_get(parsed, "correlation_ambiguities", ()))
         or bool(_get(parsed, "operational_schema_issues", ()))
         or doctor_status in {
-            "MALFORMED_RECORD", "TRUNCATED_TRANSCRIPT", "UNKNOWN_CORRUPTION", "OVERSIZED_PAYLOAD",
+            "CORRUPTED_TOOL_CALL", "MALFORMED_RECORD", "TRUNCATED_TRANSCRIPT", "UNKNOWN_CORRUPTION", "OVERSIZED_PAYLOAD",
             "REPO_STATE_DIVERGED", "UNKNOWN_OPERATIONAL_SCHEMA",
         }
     )

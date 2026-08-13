@@ -95,7 +95,7 @@ def _meta(session_id: str, cwd: Path) -> dict[str, Any]:
     return {
         "timestamp": "2026-08-12T00:00:00Z",
         "type": "session_meta",
-        "payload": {"id": session_id, "session_id": session_id, "cwd": str(cwd), "cli_version": "0.147.0"},
+        "payload": {"id": session_id, "session_id": session_id, "cwd": cwd.as_posix(), "cli_version": "0.147.0"},
     }
 
 

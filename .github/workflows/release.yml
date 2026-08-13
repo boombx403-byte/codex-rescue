@@ -1,11 +1,26 @@
-name: Publish Alpha 2 to PyPI
+name: Publish Alpha 3 to PyPI
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Published GitHub prerelease tag"
+        required: true
+        default: "v0.1.0-alpha.3"
+      expected_version:
+        description: "PyPI version encoded in the exact assets"
+        required: true
+        default: "0.1.0a3"
+      wheel_sha256:
+        description: "SHA256 of the validated wheel asset"
+        required: true
+      sdist_sha256:
+        description: "SHA256 of the validated sdist asset"
+        required: true
 
 jobs:
   publish:
-    name: Publish codex-rescue 0.1.0a2
+    name: Publish codex-rescue ${{ inputs.expected_version }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,22 +32,35 @@ jobs:
       - name: Checkout exact tagged commit
         uses: actions/checkout@v4
         with:
-          ref: bfc3ff18c5bbb251fda350940a19beb8bd2b6c19
+          ref: ${{ inputs.release_tag }}
           fetch-depth: 0
 
       - name: Verify checkout and tag identity
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         shell: bash
         run: |
           set -euo pipefail
-          expected='bfc3ff18c5bbb251fda350940a19beb8bd2b6c19'
+          expected="$(git rev-parse "${RELEASE_TAG}^{commit}")"
           test "$(git rev-parse HEAD)" = "$expected"
-          test "$(git rev-parse 'refs/tags/v0.1.0-alpha.2^{}')" = "$expected"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          expected = os.environ["EXPECTED_VERSION"]
+          version = re.search(r'__version__\s*=\s*["\']([^"\']+)', Path("src/codex_rescue/__init__.py").read_text())
+          if not version or version.group(1) != expected:
+              raise SystemExit(f"package version does not match {expected!r}")
+          PY
 
       - name: Download exact assets from the GitHub prerelease
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.1.0-alpha.2
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -50,13 +78,15 @@ jobs:
 
           data = json.loads(Path("release.json").read_text(encoding="utf-8"))
           expected_tag = os.environ["RELEASE_TAG"]
+          version = os.environ["EXPECTED_VERSION"]
           expected_assets = {
-              "codex_rescue-0.1.0a2-py3-none-any.whl",
-              "codex_rescue-0.1.0a2.tar.gz",
+              f"codex_rescue-{version}-py3-none-any.whl",
+              f"codex_rescue-{version}.tar.gz",
           }
+          expected_name = f"Codex Rescue {expected_tag}"
           if data.get("draft") is not False or data.get("prerelease") is not True:
               raise SystemExit("release must be a published prerelease")
-          if data.get("tag_name") != expected_tag or data.get("name") != expected_tag:
+          if data.get("tag_name") != expected_tag or data.get("name") != expected_name:
               raise SystemExit("prerelease tag/title mismatch")
           assets = data.get("assets", [])
           names = [asset.get("name") for asset in assets]
@@ -76,8 +106,7 @@ jobs:
           data = json.loads(Path("release.json").read_text(encoding="utf-8"))
           out_dir = Path("dist")
           for asset in data["assets"]:
-              name = asset["name"]
-              output = out_dir / name
+              output = out_dir / asset["name"]
               with output.open("wb") as stream:
                   subprocess.run(
                       [
@@ -90,17 +119,20 @@ jobs:
                   )
           PY
 
-      - name: Verify exact artifact SHA256
+      - name: Verify exact artifact SHA256 and metadata
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ inputs.sdist_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
-          printf '%s  %s\n' \
-            '18834fc4eced65ce49f1b568fa3db519a1e1ad77e72213bb7d693c9db6776e4a' \
-            'dist/codex_rescue-0.1.0a2-py3-none-any.whl' | sha256sum -c -
-          printf '%s  %s\n' \
-            '1ccffcf19c929cb1b01f313d104d5cde28d2fc2a6097d03bef502a68d438165a' \
-            'dist/codex_rescue-0.1.0a2.tar.gz' | sha256sum -c -
+          wheel="dist/codex_rescue-${EXPECTED_VERSION}-py3-none-any.whl"
+          sdist="dist/codex_rescue-${EXPECTED_VERSION}.tar.gz"
+          printf '%s  %s\n' "$WHEEL_SHA256" "$wheel" | sha256sum -c -
+          printf '%s  %s\n' "$SDIST_SHA256" "$sdist" | sha256sum -c -
+          python3 -m pip install --disable-pip-version-check twine
+          python3 -m twine check "$wheel" "$sdist"
 
       - name: Publish exact artifacts to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

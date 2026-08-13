@@ -37,6 +37,7 @@ class ParseResult:
     compaction_state_loss: bool = False
     compaction_loss_evidence: list[dict[str, Any]] = field(default_factory=list)
     malformed_tool_arguments: list[dict[str, Any]] = field(default_factory=list)
+    corrupted_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     # Correlation is deliberately conservative.  A repeated call id, a
     # family mismatch, or an output that cannot be tied to one call is an
     # ambiguity rather than evidence of completion.
@@ -68,6 +69,7 @@ class ParseResult:
             "compaction_state_loss": self.compaction_state_loss,
             "compaction_loss_evidence": self.compaction_loss_evidence,
             "malformed_tool_arguments": self.malformed_tool_arguments,
+            "corrupted_tool_calls": self.corrupted_tool_calls,
             "correlation_ambiguities": self.correlation_ambiguities,
             "operational_schema_issues": self.operational_schema_issues,
             "oversized_record_count": self.oversized_record_count,
@@ -129,6 +131,48 @@ MAX_OCCURRENCES_PER_ID = 2
 MAX_RECORD_TYPES = 1024
 MAX_RETAINED_EVENT_BYTES = 256 * 1024
 MAX_EVENT_TAIL_BYTES = 4 * 1024 * 1024
+CORRUPTED_TOOL_NAME_SENTINEL = "<corrupted-tool-name>"
+
+
+def _control_codepoints(value: str) -> list[int]:
+    return sorted({
+        ord(character)
+        for character in value
+        if ord(character) < 0x20 or ord(character) == 0x7F
+    })
+
+
+def _corrupted_tool_call_metadata(
+    payload: dict[str, Any],
+    offset: int,
+) -> dict[str, Any] | None:
+    """Return bounded evidence for control characters in a persisted tool name.
+
+    The raw name is intentionally not copied into the diagnostic finding.  A
+    malformed name is evidence of damaged history, not evidence of which tool
+    the caller intended to invoke.
+    """
+
+    kind = payload.get("type")
+    name = payload.get("name")
+    if kind not in _CALL_FAMILIES or not isinstance(name, str):
+        return None
+    control_codepoints = _control_codepoints(name)
+    if not control_codepoints:
+        return None
+    return {
+        "offset": offset,
+        "call_id": str(payload.get("call_id") or payload.get("id") or ""),
+        "family": str(kind),
+        "name_length": len(name),
+        "control_codepoints": control_codepoints,
+        "control_character_count": sum(
+            1 for character in name
+            if ord(character) < 0x20 or ord(character) == 0x7F
+        ),
+        "name_sha256": hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest(),
+        "reason": "persisted tool-call name contains control characters",
+    }
 
 
 def _operational_schema_issue(payload: dict[str, Any], outer_type: object, offset: int) -> dict[str, Any] | None:
@@ -272,6 +316,9 @@ def parse_transcript(
 
             payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
             kind = _record_kind(record)
+            corrupted_tool_call = _corrupted_tool_call_metadata(payload, start)
+            if corrupted_tool_call and len(result.corrupted_tool_calls) < MAX_RETAINED_FINDINGS:
+                result.corrupted_tool_calls.append(corrupted_tool_call)
             is_oversized = _looks_like_large_inline_payload(line, kind, oversized_threshold)
             stored_payload = payload
             if is_oversized or len(line) > MAX_RETAINED_EVENT_BYTES:
@@ -290,6 +337,14 @@ def parse_transcript(
                         "byte_length": len(line),
                         "sha256": hashlib.sha256(line).hexdigest(),
                     }
+            if corrupted_tool_call:
+                # Keep the parser's retained event and all later recovery
+                # surfaces free of the raw decoded control characters. The
+                # original name remains available only through bounded hash,
+                # length, and codepoint metadata above.
+                if stored_payload is payload:
+                    stored_payload = dict(payload)
+                stored_payload["name"] = CORRUPTED_TOOL_NAME_SENTINEL
             event = TranscriptEvent(start, offset, record.get("type"), stored_payload)
             result.valid_record_count += 1
             if not invalid_seen:
@@ -484,7 +539,9 @@ def parse_transcript(
         result.correlation_ambiguities.append(
             {"reason": "correlation state exceeded bounded memory limit", "max_states": MAX_CORRELATION_STATES}
         )
-    if result.malformed_tool_arguments and result.corruption_class is None:
+    if result.corrupted_tool_calls and result.corruption_class is None:
+        result.corruption_class = "CORRUPTED_TOOL_CALL"
+    elif result.malformed_tool_arguments and result.corruption_class is None:
         result.corruption_class = "MALFORMED_RECORD"
     elif result.oversized_records and result.corruption_class is None:
         result.corruption_class = "OVERSIZED_PAYLOAD"

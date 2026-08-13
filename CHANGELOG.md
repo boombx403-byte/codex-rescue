@@ -2,6 +2,27 @@
 
 All notable changes to Codex Rescue will be documented in this file.
 
+## v0.1.0-alpha.3
+
+Third experimental alpha release, with a narrow diagnostic fix derived from
+[openai/codex#24369](https://github.com/openai/codex/issues/24369).
+
+### Corrupted persisted tool-call names
+
+- Detect persisted `function_call.name` values containing NUL or other ASCII
+  control characters and classify them as `CORRUPTED_TOOL_CALL`.
+- Preserve only bounded metadata for the damaged name; do not guess or
+  automatically repair the intended tool name.
+- Keep the original rollout untouched, do not replay the corrupted call, and
+  keep verification fail-closed with `REVIEW_REQUIRED`.
+- Retain real-world regression coverage for #14824 (orphaned/missing tool
+  output) and #37719 (oversized persisted tool output).
+
+### Limitations
+
+- This does not repair Codex HTTP 400 responses, server-side replay, arbitrary
+  malformed arguments, or broad corrupted-session/compaction recovery.
+
 ## v0.1.0-alpha.2
 
 Second experimental alpha release.

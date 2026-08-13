@@ -10,6 +10,7 @@ from .transcript import ParseResult, parse_transcript
 
 SEVERITY = [
     "UNKNOWN_CORRUPTION",
+    "CORRUPTED_TOOL_CALL",
     "MALFORMED_RECORD",
     "TRUNCATED_TRANSCRIPT",
     "OVERSIZED_PAYLOAD",

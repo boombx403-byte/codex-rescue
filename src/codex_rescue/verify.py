@@ -178,6 +178,8 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
         reasons.append("compaction was observed; continuation requires review")
     if transcript.get("compaction_state_loss"):
         reasons.append("compaction state-loss evidence requires review")
+    if transcript.get("corrupted_tool_calls"):
+        reasons.append("corrupted tool-call metadata requires review")
     if transcript.get("correlation_ambiguities"):
         reasons.append("tool call/output correlation is ambiguous")
     if transcript.get("operational_schema_issues"):
