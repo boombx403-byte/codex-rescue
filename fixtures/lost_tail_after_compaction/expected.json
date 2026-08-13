@@ -1,3 +1,4 @@
 {
-  "doctor": "COMPACTION_STATE_LOSS"
+  "doctor": "COMPACTION_STATE_LOSS",
+  "verify": "STATE_DIVERGED"
 }

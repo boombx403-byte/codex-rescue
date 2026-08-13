@@ -18,6 +18,20 @@ HOOK_EVENTS = (
     "SessionEnd", "SubagentStart", "SubagentStop",
 )
 
+_SECRET_PATTERNS = (
+    (re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\bnpm_[A-Za-z0-9_-]{16,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\bpypi-[A-Za-z0-9_-]{16,}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED_JWT]"),
+    (re.compile(r"(?i)(https?://)([^/\s:@]+):([^@\s/]+)@"), r"\1[REDACTED_USER]:[REDACTED]@"),
+    (re.compile(r'''(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)[^\s,;"'}]+'''), r"\1[REDACTED]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_TOKEN]"),
+    (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.DOTALL), "[REDACTED_PRIVATE_KEY]"),
+)
+
 
 def _bounded(value: Any, limit: int = 500) -> str | None:
     if value is None:
@@ -25,7 +39,8 @@ def _bounded(value: Any, limit: int = 500) -> str | None:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
     text = re.sub(r"data:[^;]+;base64,[A-Za-z0-9+/=]+", "[REDACTED_INLINE_PAYLOAD]", text)
     text = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED]", text)
-    text = re.sub(r"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*)[^\s,;]+", r"\1[REDACTED]", text)
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
     if len(text) > limit:
         digest = hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()[:16]
         return f"{text[:limit]}… [bounded sha256:{digest}]"

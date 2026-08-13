@@ -2,6 +2,27 @@
 
 All notable changes to Codex Rescue will be documented in this file.
 
+## v0.1.0-alpha.2
+
+Second experimental alpha release.
+
+### Safety and recovery hardening
+
+- Fail closed on compaction state loss, ambiguous tool correlation, and unknown operational records.
+- Verify coherent source snapshots before producing a rescue artifact.
+- Strengthen Git-state fingerprinting against hostile environment overrides, external diff hooks, hidden index flags, and untracked-file edge cases.
+- Bound transcript, event-tail, and file-hashing memory use; preserve a conservative review-required outcome when limits are exceeded.
+- Expand and align secret redaction across recovery artifacts, discovery, and hooks.
+- Use structured continuation arguments and explicit untrusted-evidence boundaries in recovery prompts.
+- Improve artifact identifier validation, atomic-write retry behavior, and fixture portability around transient Git lock files.
+- Exclude the default local rescue-artifact directory from source distributions.
+
+### Validation
+
+- Full Windows and Linux validation completed on the exact candidate.
+- Strict real-macOS GitHub Actions evidence gate completed for the exact 105-file candidate archive.
+- Wheel and sdist were built, inspected, and smoke-tested from fresh isolated environments.
+
 ## v0.1.0-alpha
 
 Initial experimental alpha release.

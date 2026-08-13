@@ -1,3 +1,4 @@
 {
-  "doctor": "UNFINISHED_TOOL_CALL"
+  "doctor": "UNFINISHED_TOOL_CALL",
+  "verify": "STATE_DIVERGED"
 }

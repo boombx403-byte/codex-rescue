@@ -80,4 +80,3 @@ def read_entries(root: str | Path, session_id: str) -> tuple[list[dict[str, Any]
 
 def utc_timestamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-

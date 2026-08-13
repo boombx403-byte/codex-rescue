@@ -1,3 +1,4 @@
 {
-  "doctor": "OVERSIZED_PAYLOAD"
+  "doctor": "OVERSIZED_PAYLOAD",
+  "verify": "STATE_DIVERGED"
 }

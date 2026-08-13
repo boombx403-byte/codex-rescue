@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/shleder/codex-rescue/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/shleder/codex-rescue/ci.yml?branch=main&style=flat-square&label=CI&logo=github" alt="CI Status"></a>
-  <a href="https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha"><img src="https://img.shields.io/badge/version-v0.1.0--alpha-3fb950?style=flat-square" alt="Version"></a>
+  <img src="https://img.shields.io/badge/version-v0.1.0--alpha.2-3fb950?style=flat-square" alt="Version">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-1f6feb?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <a href="#privacy"><img src="https://img.shields.io/badge/privacy-100%25%20local--first-238636?style=flat-square" alt="Privacy"></a>
@@ -147,7 +147,7 @@ cd codex-rescue
 # Install in editable mode
 pip install -e .
 
-# Run full unit test suite (43 passed, 1 skipped)
+# Run full unit test suite (58 passed, 1 expected skip)
 python -m unittest discover -s tests -v
 
 # Run synthetic fixture harness (5/5 PASS)

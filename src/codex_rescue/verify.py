@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_handoff
+from .artifacts import load_handoff, validate_handoff
 from .gitstate import GitStateError, compare_git_state, inspect_git_state
 
 
@@ -55,6 +55,7 @@ def _source_rollout_check(handoff: dict[str, Any]) -> tuple[list[str], list[str]
     session = _mapping(handoff.get("session"))
     transcript = _mapping(handoff.get("transcript"))
     source = _mapping(handoff.get("source"))
+    snapshot = _mapping(handoff.get("source_snapshot"))
     source_ref = _first_value(
         session.get("source_ref"),
         session.get("source_path"),
@@ -79,6 +80,7 @@ def _source_rollout_check(handoff: dict[str, Any]) -> tuple[list[str], list[str]
         source.get("size"),
         source.get("byte_size"),
     )
+    expected_mtime_ns = _first_value(snapshot.get("mtime_ns"))
 
     # An old handoff can contain only a logical source identifier.  Do not
     # mistake that identifier for a local path and break verification.
@@ -125,6 +127,15 @@ def _source_rollout_check(handoff: dict[str, Any]) -> tuple[list[str], list[str]
             conflicts.append(
                 f"source_size: expected {expected_size_value}, actual {actual_size}"
             )
+    if expected_mtime_ns is not None:
+        try:
+            expected_mtime_value = int(expected_mtime_ns)
+        except (TypeError, ValueError):
+            return conflicts, [f"saved source mtime is invalid: {expected_mtime_ns!r}"]
+        if expected_mtime_value != int(stat.st_mtime_ns):
+            conflicts.append(
+                f"source_mtime_ns: expected {expected_mtime_value}, actual {int(stat.st_mtime_ns)}"
+            )
     return conflicts, []
 
 
@@ -133,6 +144,16 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
         handoff = load_handoff(Path(root), rescue_id)
     except (OSError, ValueError, TypeError) as exc:
         return VerifyResult("REVIEW_REQUIRED", (), (f"handoff unavailable or invalid: {exc}",))
+
+    # Legacy alpha artifacts had no schema marker.  Enforce the strict v1
+    # contract whenever a v1 marker is present; retain read-only compatibility
+    # for markerless forensic artifacts.
+    schema_errors = validate_handoff(
+        handoff,
+        strict=isinstance(handoff, dict) and ("schema" in handoff or "schema_version" in handoff),
+    )
+    if schema_errors:
+        return VerifyResult("REVIEW_REQUIRED", (), tuple(f"invalid v1 handoff: {item}" for item in schema_errors))
 
     repository = _mapping(handoff.get("repository"))
     session = _mapping(handoff.get("session"))
@@ -152,6 +173,18 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
         return VerifyResult("STATE_DIVERGED", tuple(conflicts), ())
     reasons: list[str] = []
     reasons.extend(source_review_reasons)
+    transcript = _mapping(handoff.get("transcript"))
+    if transcript.get("compacted"):
+        reasons.append("compaction was observed; continuation requires review")
+    if transcript.get("compaction_state_loss"):
+        reasons.append("compaction state-loss evidence requires review")
+    if transcript.get("correlation_ambiguities"):
+        reasons.append("tool call/output correlation is ambiguous")
+    if transcript.get("operational_schema_issues"):
+        reasons.append("unknown operational schema requires review")
+    snapshot = _mapping(handoff.get("source_snapshot"))
+    if snapshot.get("stable") is False:
+        reasons.append("source rollout changed during salvage snapshot")
     unfinished = _mapping(handoff.get("tool_state")).get("unfinished_action")
     if unfinished:
         reasons.append("unfinished action requires inspection before replay")

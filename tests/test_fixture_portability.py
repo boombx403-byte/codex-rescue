@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_rescue.fixtures import materialize_fixture_git_repo, _hash_tree_files
 
@@ -36,6 +38,22 @@ class FixturePortabilityTests(unittest.TestCase):
             self.assertFalse((repo_actual / ".git").exists(), f"Runtime .git not cleaned up in {fixture.name}")
             after_hashes = _hash_tree_files(repo_actual)
             self.assertEqual(before_hashes, after_hashes, f"repo_actual mutated after fixture {fixture.name}")
+
+    def test_materialization_ignores_transient_git_locks(self) -> None:
+        fixture = FIXTURES_DIR / "kill_apply_patch"
+        repo_actual = fixture / "repo_actual"
+        real_copytree = shutil.copytree
+
+        def copytree_with_maintenance_lock(src: str | Path, dst: str | Path, *args: object, **kwargs: object) -> Path:
+            if Path(src).name == ".git":
+                lock = Path(src) / "objects" / "maintenance.lock"
+                lock.parent.mkdir(parents=True, exist_ok=True)
+                lock.write_text("transient\n", encoding="utf-8")
+            return real_copytree(src, dst, *args, **kwargs)
+
+        with patch("codex_rescue.fixtures.shutil.copytree", side_effect=copytree_with_maintenance_lock):
+            with materialize_fixture_git_repo(fixture):
+                self.assertFalse((repo_actual / ".git" / "objects" / "maintenance.lock").exists())
 
 
 if __name__ == "__main__":

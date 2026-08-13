@@ -1,4 +1,4 @@
-# Codex Rescue v0.1.0-alpha Release Checklist
+# Codex Rescue v0.1.0-alpha.2 Release Checklist
 
 ## Core safety
 - [x] doctor does not modify source rollout
@@ -35,6 +35,7 @@
 - [x] CI workflow (verified green across Windows/Ubuntu x Python 3.11/3.12/3.13)
 - [x] clean public clone fixture portability verified
 - [x] release notes
+- [x] strict real-macOS gate verified for the exact release candidate
 
 ## Claims
 - [x] README says experimental alpha

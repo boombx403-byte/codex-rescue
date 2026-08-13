@@ -68,7 +68,10 @@ def materialize_fixture_git_repo(fixture: Path) -> Iterator[Path]:
         subprocess.run(["git", "commit", "-qm", "fixture baseline"], cwd=baseline, env=env, check=True, capture_output=True)
 
         git_dst = repo_actual / ".git"
-        shutil.copytree(baseline / ".git", git_dst)
+        # Git may create and remove maintenance locks while the repository is
+        # being copied.  They are transient state, not part of the fixture,
+        # so ignore them to avoid a cross-platform copy race.
+        shutil.copytree(baseline / ".git", git_dst, ignore=shutil.ignore_patterns("*.lock"))
 
         try:
             yield repo_actual
@@ -144,7 +147,12 @@ def generate_fixtures(root: str | Path) -> None:
             raw += _line({"type": "compacted", "payload": {"message": "generic summary without operational tail", "replacement_history": [], "window_number": 1, "window_id": "w1"}})
 
         session.write_bytes(raw)
-        (fixture / "expected.json").write_text(json.dumps({"doctor": expected}, indent=2) + "\n", encoding="utf-8")
+        # The fixture's repo_actual intentionally contains the interrupted
+        # side effect, so verification must fail closed on repository drift.
+        (fixture / "expected.json").write_text(
+            json.dumps({"doctor": expected, "verify": "STATE_DIVERGED"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
         (fixture / "README.md").write_text(
             f"# {name}\n\nSynthetic fixture matching the Codex 0.147.0 JSONL envelope. Expected primary class: `{expected}`.\n",
             encoding="utf-8",

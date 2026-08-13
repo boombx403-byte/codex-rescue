@@ -1,4 +1,4 @@
-"""Codex Rescue v0.1.0-alpha deterministic demo.
+"""Codex Rescue v0.1.0-alpha.2 deterministic demo.
 
 Uses the kill_apply_patch synthetic fixture to demonstrate:
   doctor  -> identifies UNFINISHED_TOOL_CALL
@@ -41,7 +41,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     print("=" * 60)
-    print("Codex Rescue v0.1.0-alpha -- Deterministic Demo")
+    print("Codex Rescue v0.1.0-alpha.2 -- Deterministic Demo")
     print("=" * 60)
     print()
 
