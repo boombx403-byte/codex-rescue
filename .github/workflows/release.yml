@@ -28,7 +28,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$expected"
           test "$(git rev-parse 'refs/tags/v0.1.0-alpha.2^{}')" = "$expected"
 
-      - name: Download exact assets from the draft GitHub release
+      - name: Download exact assets from the GitHub prerelease
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -54,17 +54,17 @@ jobs:
               "codex_rescue-0.1.0a2-py3-none-any.whl",
               "codex_rescue-0.1.0a2.tar.gz",
           }
-          if data.get("draft") is not True:
-              raise SystemExit("release must already be a draft")
+          if data.get("draft") is not False or data.get("prerelease") is not True:
+              raise SystemExit("release must be a published prerelease")
           if data.get("tag_name") != expected_tag or data.get("name") != expected_tag:
-              raise SystemExit("draft release tag/title mismatch")
+              raise SystemExit("prerelease tag/title mismatch")
           assets = data.get("assets", [])
           names = [asset.get("name") for asset in assets]
           if set(names) != expected_assets or len(names) != len(expected_assets):
-              raise SystemExit(f"draft release assets mismatch: {names!r}")
+              raise SystemExit(f"prerelease assets mismatch: {names!r}")
           for asset in assets:
               if asset["name"] not in expected_assets or not asset.get("id"):
-                  raise SystemExit("draft release asset metadata is incomplete")
+                  raise SystemExit("prerelease asset metadata is incomplete")
           PY
 
           python3 - <<'PY'
