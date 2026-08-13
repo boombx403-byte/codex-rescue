@@ -23,7 +23,9 @@ Codex Rescue is a local-first fsck and crash-recovery tool for OpenAI Codex sess
 
 ## Core Commands
 
-Rescue provides four narrow, read-only diagnostic and recovery entry points:
+Rescue provides four narrow diagnostic and recovery entry points. The original
+Codex rollout is read-only; `salvage` writes only a new handoff under the
+rescue root.
 
 | Command | Usage | Description |
 |---|---|---|
@@ -65,23 +67,60 @@ pipx install codex-rescue
 pip install codex-rescue
 ```
 
-### 2. Workflow Example
+### 2. First 5 minutes
+
+Use this sequence with a local Codex installation. It never needs a raw
+rollout upload:
 
 ```bash
-# 1. Discover recent Codex sessions
+# 1. Confirm the installation
+codex-rescue --version
+
+# 2. Discover recent Codex sessions
 codex-rescue sessions
 
-# 2. Diagnose the latest session
+# 3. Diagnose the latest session
 codex-rescue doctor --latest
 
-# 3. Generate an immutable recovery handoff
+# 4. Generate an immutable recovery handoff (the --fork is required)
 codex-rescue salvage --latest --fork
 
-# 4. Verify repository state before continuing
+# 5. Verify repository state before continuing
 codex-rescue verify <rescue-id>
 ```
 
-### Sample Output
+`sessions` reads the default Codex home. If it returns no sessions, that is
+normal on a new machine or before Codex has created a rollout; use
+`--codex-home PATH` when Codex runs with a non-default home. `doctor` and
+`salvage` exit with an explanatory “no session discovered” error when there is
+nothing to inspect. `salvage --fork` is deliberately required so recovery
+artifacts are written separately under
+`.codex-rescue/rescues/<rescue-id>` and the original rollout is preserved.
+
+`verify` returns exit code 3 for `REVIEW_REQUIRED`. That is a conservative
+result, not a command to replay an uncertain action. Inspect the report and
+do not automatically repeat unknown side effects.
+
+### Troubleshooting
+
+- **No sessions found:** run `codex-rescue sessions --json`, check the Codex
+  home path, and confirm that Codex has written at least one rollout. Do not
+  copy or upload an unsanitized session just to make discovery succeed.
+- **Permission or unsupported-environment errors:** record the OS, Python,
+  Codex CLI, and Git versions plus the failing command and exit code. Check
+  that the account running Rescue can read the Codex home and repository; do
+  not modify the original rollout to work around a permission error.
+- **`UNKNOWN` or `REVIEW_REQUIRED`:** these statuses are fail-closed. They
+  mean the available evidence cannot prove that continuing is safe. Preserve
+  the original files and report the sanitized diagnostics instead of replaying
+  the action.
+
+When reporting a failure, use the [Recovery Report template](https://github.com/shleder/codex-rescue/issues/new?template=recovery-report.yml).
+Include sanitized JSON, versions, the exact command and exit code, and whether
+the original rollout stayed unchanged. Never attach raw `.jsonl`/SQLite files,
+credentials, private prompts, or unredacted absolute home paths.
+
+### 3. Sample output
 
 ```text
 $ codex-rescue doctor --latest
