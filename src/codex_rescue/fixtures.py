@@ -147,10 +147,12 @@ def generate_fixtures(root: str | Path) -> None:
             raw += _line({"type": "compacted", "payload": {"message": "generic summary without operational tail", "replacement_history": [], "window_number": 1, "window_id": "w1"}})
 
         session.write_bytes(raw)
-        # The fixture's repo_actual intentionally contains the interrupted
-        # side effect, so verification must fail closed on repository drift.
+        # repo_before is a harness-only reference snapshot; it is not a
+        # durable pre-salvage baseline in the handoff.  The verifier therefore
+        # must not infer repository divergence from repo_before/repo_actual.
+        # Unknown execution or transcript state is REVIEW_REQUIRED instead.
         (fixture / "expected.json").write_text(
-            json.dumps({"doctor": expected, "verify": "STATE_DIVERGED"}, indent=2) + "\n",
+            json.dumps({"doctor": expected, "verify": "REVIEW_REQUIRED"}, indent=2) + "\n",
             encoding="utf-8",
         )
         (fixture / "README.md").write_text(

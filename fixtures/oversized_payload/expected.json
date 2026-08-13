@@ -1,4 +1,4 @@
 {
   "doctor": "OVERSIZED_PAYLOAD",
-  "verify": "STATE_DIVERGED"
+  "verify": "REVIEW_REQUIRED"
 }

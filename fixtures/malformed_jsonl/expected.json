@@ -1,4 +1,4 @@
 {
   "doctor": "MALFORMED_RECORD",
-  "verify": "STATE_DIVERGED"
+  "verify": "REVIEW_REQUIRED"
 }
