@@ -40,7 +40,7 @@ jobs:
 
           gh api \
             --header 'Accept: application/vnd.github+json' \
-            "/repos/${GITHUB_REPOSITORY}/releases/369967130" \
+            "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
             > release.json
 
           python3 - <<'PY'
