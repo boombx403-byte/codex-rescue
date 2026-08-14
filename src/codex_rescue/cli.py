@@ -10,6 +10,13 @@ from .salvage import salvage_session
 from .verify import verify_rescue
 
 
+HEALTHY_EXPLANATION = (
+    "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
+    "It does not validate Codex Desktop sidebar/index/Remote metadata, prove semantic completeness, "
+    "or rule out every upstream Codex failure mode."
+)
+
+
 def _json(data: object) -> None:
     print(json.dumps({"schema_version": 1, "data": data}, indent=2, ensure_ascii=False, sort_keys=True))
 
@@ -43,13 +50,16 @@ def _parsed_from_doctor(result: object):
 
 def _print_doctor(result: object) -> None:
     data = _to_dict(result)
-    print(f"Doctor: {data.get('status', 'UNKNOWN_CORRUPTION')}")
+    status = str(data.get("status", "UNKNOWN_CORRUPTION"))
+    print(f"Doctor: {status}")
     session = data.get("session")
     if session:
         print(f"Session: {session}")
     findings = list(data.get("findings") or [])
     if findings:
         print(f"Findings: {', '.join(str(item) for item in findings)}")
+    if status == "HEALTHY":
+        print(f"Note: {HEALTHY_EXPLANATION}")
     repository = data.get("repository")
     if isinstance(repository, dict):
         cwd = repository.get("cwd")
@@ -86,7 +96,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sessions = subs.add_parser("sessions")
     sessions.add_argument("--codex-home", type=Path)
-    sessions.add_argument("--limit", type=int, default=20)
+    sessions.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help=(
+            "bounded listing window of the most recently modified rollouts (default: 20); "
+            "increase when checking an older known session; omission does not prove a rollout is undiscoverable"
+        ),
+    )
     sessions.add_argument("--latest", action="store_true")
     sessions.add_argument("--json", action="store_true")
 
