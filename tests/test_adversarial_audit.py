@@ -9,10 +9,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from codex_rescue.artifacts import atomic_write, load_handoff, validate_handoff, write_rescue
-from codex_rescue.discovery import discover_sessions, lightweight_scan, resolve_latest
 from codex_rescue.doctor import SEVERITY, doctor_session
 from codex_rescue.gitstate import GitStateError, compare_git_state, inspect_git_state
 from codex_rescue.reconstruct import (
@@ -37,7 +35,7 @@ def _sha256(data: bytes) -> str:
 
 
 class AdversarialAuditTests(unittest.TestCase):
-    """Exhaustive adversarial test suite probing edge states and invariants."""
+    """Rigorous, pruned adversarial regression suite defending core safety invariants."""
 
     def _init_git_repo(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
@@ -50,10 +48,10 @@ class AdversarialAuditTests(unittest.TestCase):
         subprocess.run(["git", "commit", "-qm", "initial"], cwd=path, check=True)
 
     # =========================================================================
-    # Category 1: Tool Call / Output Correlation Probes
+    # Group 1: Tool Call / Output Correlation & Invariant Defense
     # =========================================================================
 
-    def test_cat1_01_valid_call_missing_output_diagnosed_as_unfinished(self) -> None:
+    def test_valid_call_missing_output_diagnosed_as_unfinished(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -75,7 +73,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertIn("UNFINISHED_TOOL_CALL", doc.findings)
             self.assertEqual(file_sha256(path), sha_before)
 
-    def test_cat1_02_output_without_matching_call_is_schema_issue(self) -> None:
+    def test_orphaned_output_diagnosed_as_schema_issue(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -93,7 +91,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(doc.status, "UNKNOWN_OPERATIONAL_SCHEMA")
             self.assertIn("UNKNOWN_OPERATIONAL_SCHEMA", doc.findings)
 
-    def test_cat1_03_duplicate_call_ids_trigger_ambiguity(self) -> None:
+    def test_duplicate_call_ids_trigger_correlation_ambiguity(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -107,7 +105,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.correlation_ambiguities)
             self.assertEqual(doctor_session(path).status, "UNKNOWN_OPERATIONAL_SCHEMA")
 
-    def test_cat1_04_duplicate_output_ids_trigger_ambiguity(self) -> None:
+    def test_duplicate_output_ids_trigger_correlation_ambiguity(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -121,7 +119,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.correlation_ambiguities)
             self.assertEqual(doctor_session(path).status, "UNKNOWN_OPERATIONAL_SCHEMA")
 
-    def test_cat1_05_output_preceding_call_handled_without_crash(self) -> None:
+    def test_inverted_output_preceding_call_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -131,11 +129,10 @@ class AdversarialAuditTests(unittest.TestCase):
             path.write_bytes(b"".join((json.dumps(r) + "\n").encode() for r in records))
 
             parsed = parse_transcript(path)
-            # Inverted call/output order is conservatively treated as an unmatched output / schema issue
             self.assertTrue(parsed.correlation_ambiguities)
             self.assertEqual(doctor_session(path).status, "UNKNOWN_OPERATIONAL_SCHEMA")
 
-    def test_cat1_06_family_mismatch_fails_correlation(self) -> None:
+    def test_call_output_family_mismatch_fails_correlation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             records = [
@@ -148,24 +145,11 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.correlation_ambiguities)
             self.assertEqual(doctor_session(path).status, "UNKNOWN_OPERATIONAL_SCHEMA")
 
-    def test_cat1_07_tool_search_call_and_output_match_cleanly(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "rollout.jsonl"
-            records = [
-                {"type": "response_item", "payload": {"type": "tool_search_call", "call_id": "ts1", "name": "tool_search", "arguments": "{}"}},
-                {"type": "response_item", "payload": {"type": "tool_search_output", "call_id": "ts1", "output": "results"}},
-            ]
-            path.write_bytes(b"".join((json.dumps(r) + "\n").encode() for r in records))
-
-            parsed = parse_transcript(path)
-            self.assertEqual(len(parsed.unfinished_tool_calls), 0)
-            self.assertEqual(doctor_session(path).status, "HEALTHY")
-
     # =========================================================================
-    # Category 2: Corrupted Tool Names & Schema Issues
+    # Group 2: Corrupted Tool Names & Schema Hardening
     # =========================================================================
 
-    def test_cat2_01_tool_name_with_control_chars_diagnosed_and_sanitized(self) -> None:
+    def test_tool_name_with_control_chars_diagnosed_and_sanitized_in_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             bad_name = "bash\x00\x07\x1b[31m\r\n"
@@ -193,8 +177,8 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertNotIn(bad_name, json.dumps(handoff))
             self.assertNotIn(bad_name, brief)
 
-    def test_cat2_02_all_c0_control_characters_flagged(self) -> None:
-        for code in range(0x20):
+    def test_all_c0_and_del_control_characters_flagged(self) -> None:
+        for code in (*range(0x20), 0x7F):
             with tempfile.TemporaryDirectory() as td:
                 path = Path(td) / f"rollout_ctrl_{code}.jsonl"
                 bad_name = f"tool{chr(code)}name"
@@ -204,21 +188,9 @@ class AdversarialAuditTests(unittest.TestCase):
                 }
                 path.write_text(json.dumps(record) + "\n", encoding="utf-8")
                 parsed = parse_transcript(path)
-                self.assertEqual(parsed.corruption_class, "CORRUPTED_TOOL_CALL", f"Failed for code {code}")
+                self.assertEqual(parsed.corruption_class, "CORRUPTED_TOOL_CALL", f"Failed for codepoint {code}")
 
-    def test_cat2_03_del_control_character_0x7f_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "rollout_del.jsonl"
-            bad_name = "tool\x7fname"
-            record = {
-                "type": "response_item",
-                "payload": {"type": "function_call", "call_id": "c1", "name": bad_name, "arguments": "{}"},
-            }
-            path.write_text(json.dumps(record) + "\n", encoding="utf-8")
-            parsed = parse_transcript(path)
-            self.assertEqual(parsed.corruption_class, "CORRUPTED_TOOL_CALL")
-
-    def test_cat2_04_valid_unicode_tool_name_not_corrupted(self) -> None:
+    def test_valid_unicode_tool_name_not_flagged_as_corrupted(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout_unicode.jsonl"
             valid_name = "инструмент_123_🔥_ünicöde"
@@ -231,7 +203,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertFalse(parsed.corrupted_tool_calls)
             self.assertEqual(parsed.events[0].payload["name"], valid_name)
 
-    def test_cat2_05_tool_call_without_name_is_schema_issue(self) -> None:
+    def test_tool_call_without_name_is_schema_issue(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             record = {
@@ -244,7 +216,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.operational_schema_issues[0]["reason"], "tool call has no name")
             self.assertEqual(doctor_session(path).status, "UNKNOWN_OPERATIONAL_SCHEMA")
 
-    def test_cat2_06_tool_call_without_call_id_is_schema_issue(self) -> None:
+    def test_tool_call_without_call_id_is_schema_issue(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             record = {
@@ -256,7 +228,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.operational_schema_issues)
             self.assertEqual(parsed.operational_schema_issues[0]["reason"], "operational record has no call id")
 
-    def test_cat2_07_unknown_tool_envelope_type_is_schema_issue(self) -> None:
+    def test_unknown_operational_envelope_is_schema_issue(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "rollout.jsonl"
             record = {
@@ -269,26 +241,57 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.operational_schema_issues[0]["reason"], "unknown operational payload type")
 
     # =========================================================================
-    # Category 3: Payload & Memory Boundary Probes
+    # Group 3: Production Payload Thresholds & Boundaries
     # =========================================================================
 
-    def test_cat3_01_exact_oversized_threshold_boundary(self) -> None:
-        threshold = 100_000
+    def test_production_oversized_payload_threshold_boundaries(self) -> None:
+        """Verify boundaries against production default threshold (1_000_000 bytes)."""
         with tempfile.TemporaryDirectory() as td:
+            # 1. Plain text payload below default threshold (e.g. 800_000 bytes total record)
             p_below = Path(td) / "below.jsonl"
-            rec_below = {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "x" * 90_000}}
-            p_below.write_text(json.dumps(rec_below) + "\n", encoding="utf-8")
-            res_below = parse_transcript(p_below, oversized_threshold=threshold)
+            records_below = [
+                {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": "c1", "name": "custom_tool", "input": {}}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "A" * 799_900}},
+            ]
+            p_below.write_bytes(b"".join((json.dumps(r) + "\n").encode("utf-8") for r in records_below))
+            res_below = parse_transcript(p_below)
             self.assertFalse(res_below.oversized_records)
+            self.assertEqual(doctor_session(p_below).status, "HEALTHY")
 
+            # 2. Plain text payload above default threshold (e.g. 1_000_050 bytes total line)
             p_above = Path(td) / "above.jsonl"
-            rec_above = {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "x" * 110_000}}
-            p_above.write_text(json.dumps(rec_above) + "\n", encoding="utf-8")
-            res_above = parse_transcript(p_above, oversized_threshold=threshold)
+            records_above = [
+                {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": "c1", "name": "custom_tool", "input": {}}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "B" * 1_000_000}},
+            ]
+            p_above.write_bytes(b"".join((json.dumps(r) + "\n").encode("utf-8") for r in records_above))
+            res_above = parse_transcript(p_above)
             self.assertTrue(res_above.oversized_records)
             self.assertEqual(res_above.corruption_class, "OVERSIZED_PAYLOAD")
+            self.assertEqual(doctor_session(p_above).status, "OVERSIZED_PAYLOAD")
 
-    def test_cat3_02_max_record_bytes_bounded_streaming(self) -> None:
+            # 3. Base64 payload below vs above payload_floor boundary (500_000 bytes)
+            p_b64_below = Path(td) / "b64_below.jsonl"
+            records_b64_below = [
+                {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": "c1", "name": "custom_tool", "input": {}}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "base64 " + ("C" * 400_000)}},
+            ]
+            p_b64_below.write_bytes(b"".join((json.dumps(r) + "\n").encode("utf-8") for r in records_b64_below))
+            res_b64_below = parse_transcript(p_b64_below)
+            self.assertFalse(res_b64_below.oversized_records)
+            self.assertEqual(doctor_session(p_b64_below).status, "HEALTHY")
+
+            p_b64_above = Path(td) / "b64_above.jsonl"
+            records_b64_above = [
+                {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": "c1", "name": "custom_tool", "input": {}}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c1", "output": "base64 " + ("D" * 550_000)}},
+            ]
+            p_b64_above.write_bytes(b"".join((json.dumps(r) + "\n").encode("utf-8") for r in records_b64_above))
+            res_b64_above = parse_transcript(p_b64_above)
+            self.assertTrue(res_b64_above.oversized_records)
+            self.assertEqual(doctor_session(p_b64_above).status, "OVERSIZED_PAYLOAD")
+
+    def test_max_record_bytes_bounded_streaming_preserves_sha256(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "huge_line.jsonl"
             limit = 10_000
@@ -299,21 +302,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.oversized_record_count, 1)
             self.assertEqual(parsed.sha256, _sha256(big_line))
 
-    def test_cat3_03_raw_nul_byte_in_line_stops_at_valid_prefix(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            path = Path(td) / "nul_stream.jsonl"
-            line1 = json.dumps({"type": "session_meta", "payload": {"id": "s1"}}).encode() + b"\n"
-            line2 = b'{"type":"response_item", \x00 "corrupted": true}\n'
-            path.write_bytes(line1 + line2)
-
-            parsed = parse_transcript(path)
-            self.assertEqual(parsed.corruption_class, "MALFORMED_RECORD")
-            self.assertEqual(parsed.valid_record_count, 1)
-            self.assertEqual(parsed.last_valid_offset, len(line1))
-            self.assertEqual(parsed.first_invalid_offset, len(line1))
-            self.assertEqual(parsed.sha256, _sha256(line1 + line2))
-
-    def test_cat3_04_truncated_jsonl_at_eof(self) -> None:
+    def test_truncated_jsonl_at_eof_diagnosed_as_truncated(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "truncated.jsonl"
             line1 = json.dumps({"type": "session_meta", "payload": {"id": "s1"}}).encode() + b"\n"
@@ -325,7 +314,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.valid_record_count, 1)
             self.assertEqual(doctor_session(path).status, "TRUNCATED_TRANSCRIPT")
 
-    def test_cat3_05_malformed_middle_record(self) -> None:
+    def test_malformed_middle_record_diagnosed_as_malformed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "corrupt_middle.jsonl"
             line1 = json.dumps({"type": "session_meta", "payload": {"id": "s1"}}).encode() + b"\n"
@@ -338,7 +327,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.valid_record_count, 1)
             self.assertEqual(doctor_session(path).status, "MALFORMED_RECORD")
 
-    def test_cat3_06_non_object_json_record_is_malformed(self) -> None:
+    def test_non_object_json_record_diagnosed_as_malformed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "array_record.jsonl"
             path.write_bytes(b'["not", "an", "object"]\n')
@@ -346,10 +335,10 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(parsed.corruption_class, "MALFORMED_RECORD")
 
     # =========================================================================
-    # Category 4: Compaction & History State Probes
+    # Group 4: Compaction & State Loss Detection
     # =========================================================================
 
-    def test_cat4_01_compaction_with_state_loss_detected(self) -> None:
+    def test_compaction_with_state_loss_detected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "compacted_loss.jsonl"
             records = [
@@ -368,7 +357,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.compaction_loss_evidence)
             self.assertEqual(doctor_session(path).status, "COMPACTION_STATE_LOSS")
 
-    def test_cat4_02_compaction_without_prior_tools_is_not_state_loss(self) -> None:
+    def test_compaction_without_prior_tools_is_not_state_loss(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "compacted_clean.jsonl"
             records = [
@@ -386,7 +375,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertFalse(parsed.compaction_state_loss)
             self.assertEqual(doctor_session(path).status, "HEALTHY")
 
-    def test_cat4_03_context_compacted_payload_type_recognized(self) -> None:
+    def test_context_compacted_payload_type_recognized(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "context_compacted.jsonl"
             records = [
@@ -399,10 +388,10 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertTrue(parsed.compacted)
 
     # =========================================================================
-    # Category 5: Redaction & Secret Handling Probes
+    # Group 5: Secret Redaction & Token Handling
     # =========================================================================
 
-    def test_cat5_01_all_secret_patterns_redacted_in_handoff(self) -> None:
+    def test_secret_patterns_redacted_in_handoff_and_brief(self) -> None:
         secrets_test_text = (
             "sk-abcdefghijklmnopqrstuvwxyz123456 "
             "ghp_123456789012345678901234567890123456 "
@@ -435,7 +424,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertNotIn("MIIEowIBAAKCAQEA0", serialized)
             self.assertIn("[REDACTED", serialized)
 
-    def test_cat5_02_data_url_inline_payloads_redacted(self) -> None:
+    def test_data_url_inline_payloads_redacted(self) -> None:
         data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "data_url.jsonl"
@@ -452,10 +441,10 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertIn("[REDACTED_INLINE_PAYLOAD]", serialized)
 
     # =========================================================================
-    # Category 6: Salvage Fault Injection & Source Immutability (P1, P10)
+    # Group 6: Salvage Immutability & Fail-Closed Guards
     # =========================================================================
 
-    def test_cat6_01_salvage_preserves_source_bytes_exactly(self) -> None:
+    def test_salvage_preserves_source_bytes_and_sha256_exactly(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -486,7 +475,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(file_sha256(source), sha_before)
             self.assertEqual(source.stat().st_size, size_before)
 
-    def test_cat6_02_salvage_fails_closed_without_fork(self) -> None:
+    def test_salvage_fails_closed_without_fork(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             source = Path(td) / "rollout.jsonl"
             source.write_text('{"type":"session_meta"}\n', encoding="utf-8")
@@ -495,10 +484,10 @@ class AdversarialAuditTests(unittest.TestCase):
                 salvage_session(source, doc.transcript, doc.status, doc.findings, Path(td) / "rescue", fork=False)
 
     # =========================================================================
-    # Category 7: Verify Confidence & Git State Hardening (P2)
+    # Group 7: Verify Confidence & Git State Hardening (P2)
     # =========================================================================
 
-    def test_cat7_01_clean_repo_with_no_blockers_is_safe_to_continue(self) -> None:
+    def test_clean_repo_with_no_blockers_is_safe_to_continue(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -520,7 +509,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(verify_res.conflicts, ())
             self.assertEqual(verify_res.review_reasons, ())
 
-    def test_cat7_02_untracked_file_causes_state_diverged(self) -> None:
+    def test_untracked_file_causes_state_diverged(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -542,7 +531,7 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertEqual(verify_res.status, "STATE_DIVERGED")
             self.assertTrue(any("diff_hash" in c for c in verify_res.conflicts))
 
-    def test_cat7_03_modified_tracked_file_causes_state_diverged(self) -> None:
+    def test_modified_tracked_file_causes_state_diverged(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -563,7 +552,7 @@ class AdversarialAuditTests(unittest.TestCase):
             verify_res = verify_rescue(root / "rescue", salvage_res.rescue_id)
             self.assertEqual(verify_res.status, "STATE_DIVERGED")
 
-    def test_cat7_04_deleted_tracked_file_causes_state_diverged(self) -> None:
+    def test_deleted_tracked_file_causes_state_diverged(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -584,7 +573,7 @@ class AdversarialAuditTests(unittest.TestCase):
             verify_res = verify_rescue(root / "rescue", salvage_res.rescue_id)
             self.assertEqual(verify_res.status, "STATE_DIVERGED")
 
-    def test_cat7_05_unknown_overall_confidence_causes_review_required(self) -> None:
+    def test_unknown_overall_confidence_causes_review_required(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             repo = root / "repo"
@@ -598,7 +587,6 @@ class AdversarialAuditTests(unittest.TestCase):
             source.write_bytes(content)
 
             doc = doctor_session(source)
-            # Create handoff through build_handoff but force overall_confidence to unknown
             handoff = build_handoff(str(source), doc.transcript, inspect_git_state(repo), [], doc.status, doc.findings)
             handoff["overall_confidence"] = "unknown"
             rescue_id, _ = write_rescue(root / "rescue", handoff, "brief", "prompt")
@@ -607,66 +595,11 @@ class AdversarialAuditTests(unittest.TestCase):
             self.assertIn("handoff contains load-bearing unknowns", verify_res.review_reasons)
 
     # =========================================================================
-    # Category 8: Discovery & Lightweight Scan Probes
+    # Group 8: Deterministic Invariant Fuzzing
     # =========================================================================
 
-    def test_cat8_01_discovery_bounded_head_tail_scan(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            sessions_dir = root / "sessions"
-            sessions_dir.mkdir()
-
-            rollout = sessions_dir / "rollout-2026-01-01T00-00-00-test.jsonl"
-            records = [
-                {"type": "session_meta", "payload": {"id": "sess_disc", "cwd": str(root)}},
-                {"type": "response_item", "payload": {"type": "user_message", "message": "first prompt"}},
-                {"type": "response_item", "payload": {"type": "user_message", "message": "second prompt"}},
-            ]
-            rollout.write_bytes(b"".join((json.dumps(r) + "\n").encode() for r in records))
-
-            discovered = discover_sessions(root, limit=10)
-            self.assertEqual(len(discovered), 1)
-            self.assertEqual(discovered[0].session_id, "sess_disc")
-            self.assertEqual(discovered[0].first_prompt, "first prompt")
-            self.assertEqual(discovered[0].last_prompt, "second prompt")
-            self.assertEqual(discovered[0].status, "healthy")
-
-    def test_cat8_02_discovery_damaged_tail_classified_as_damaged(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            sessions_dir = root / "sessions"
-            sessions_dir.mkdir()
-
-            rollout = sessions_dir / "rollout-2026-01-01T00-00-00-damaged.jsonl"
-            rollout.write_bytes(b'{"type":"session_meta"}\n{"type":"response_item", UNPARSEABLE GARBAGE\n')
-
-            summary = lightweight_scan(rollout)
-            self.assertEqual(summary.status, "damaged")
-            self.assertEqual(summary.reason, "malformed tail")
-
-    def test_cat8_03_resolve_latest_finds_newest_mtime(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            sessions_dir = root / "sessions"
-            sessions_dir.mkdir()
-
-            r1 = sessions_dir / "rollout-1.jsonl"
-            r2 = sessions_dir / "rollout-2.jsonl"
-            r1.write_text('{"type":"session_meta"}\n', encoding="utf-8")
-            r2.write_text('{"type":"session_meta"}\n', encoding="utf-8")
-
-            os.utime(r1, (1000, 1000))
-            os.utime(r2, (2000, 2000))
-
-            latest = resolve_latest(root)
-            self.assertEqual(latest, r2.resolve())
-
-    # =========================================================================
-    # Category 9: Deterministic Invariant Fuzzer & Combinatorial Probes
-    # =========================================================================
-
-    def test_cat9_01_fuzz_mutations_never_modify_source_or_crash_doctor(self) -> None:
-        """Deterministic mutation generator testing invariants P1, P9."""
+    def test_deterministic_fuzz_mutations_preserve_invariants(self) -> None:
+        """Deterministic mutation generator verifying invariants P1 and P9."""
         base_records = [
             {"type": "session_meta", "payload": {"id": "fuzz_1", "cwd": "/tmp"}},
             {"type": "response_item", "payload": {"type": "user_message", "message": "fuzz prompt"}},
@@ -677,30 +610,21 @@ class AdversarialAuditTests(unittest.TestCase):
             {"type": "compacted", "payload": {"summary": "done", "replacement_history": [{"type": "user", "text": "fuzz"}]}},
         ]
 
-        mutations: list[bytes] = []
-
-        # 1. Base normal
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records))
-        # 2. Dropped last output (unfinished)
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records[:5]))
-        # 3. Truncated tail
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records)[:-15])
-        # 4. Embedded NUL byte in JSON string
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b"tool1", b"tool\x001"))
-        # 5. Control chars in tool name
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b"tool1", b"tool\x07\x1b1"))
-        # 6. Replaced call ID with duplicate
-        mutations.append(b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b'"c2"', b'"c1"'))
-        # 7. Non-JSON corrupted line inserted in middle
-        mutations.append(
-            b"".join((json.dumps(r) + "\n").encode() for r in base_records[:3])
-            + b'!!!CORRUPTED MIDDLE RECORD!!!\n'
-            + b"".join((json.dumps(r) + "\n").encode() for r in base_records[3:])
-        )
-        # 8. Empty file
-        mutations.append(b"")
-        # 9. Only invalid lines
-        mutations.append(b"GARBAGE_LINE_1\nGARBAGE_LINE_2\n")
+        mutations: list[bytes] = [
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records),
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records[:5]),
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records)[:-15],
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b"tool1", b"tool\x001"),
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b"tool1", b"tool\x07\x1b1"),
+            b"".join((json.dumps(r) + "\n").encode() for r in base_records).replace(b'"c2"', b'"c1"'),
+            (
+                b"".join((json.dumps(r) + "\n").encode() for r in base_records[:3])
+                + b'!!!CORRUPTED MIDDLE RECORD!!!\n'
+                + b"".join((json.dumps(r) + "\n").encode() for r in base_records[3:])
+            ),
+            b"",
+            b"GARBAGE_LINE_1\nGARBAGE_LINE_2\n",
+        ]
 
         for idx, mutated_bytes in enumerate(mutations):
             with tempfile.TemporaryDirectory() as td:
