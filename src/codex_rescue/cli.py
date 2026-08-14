@@ -12,7 +12,8 @@ from .verify import verify_rescue
 
 HEALTHY_EXPLANATION = (
     "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
-    "It does not validate Codex Desktop sidebar/index/Remote metadata or prove semantic completeness."
+    "It does not validate Codex Desktop sidebar/index/Remote metadata, prove semantic completeness, "
+    "or rule out every upstream Codex failure mode."
 )
 
 
@@ -99,7 +100,10 @@ def main(argv: list[str] | None = None) -> int:
         "--limit",
         type=int,
         default=20,
-        help="maximum number of most recently modified rollouts to list (default: 20); increase when checking an older known session",
+        help=(
+            "bounded listing window of the most recently modified rollouts (default: 20); "
+            "increase when checking an older known session; omission does not prove a rollout is undiscoverable"
+        ),
     )
     sessions.add_argument("--latest", action="store_true")
     sessions.add_argument("--json", action="store_true")
