@@ -40,7 +40,7 @@ class CliMvpTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 main(["sessions", "--help"])
         self.assertEqual(raised.exception.code, 0)
-        rendered = output.getvalue()
+        rendered = " ".join(output.getvalue().split())
         self.assertIn("bounded listing window", rendered)
         self.assertIn("default: 20", rendered)
         self.assertIn("older known session", rendered)
