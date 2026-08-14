@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_rescue.cli import main
 
@@ -33,6 +34,16 @@ class CliMvpTests(unittest.TestCase):
             self.assertEqual(envelope["schema_version"], 1)
             self.assertEqual(envelope["data"][0]["session_id"], "case")
 
+    def test_sessions_help_explains_bounded_default_window(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as raised:
+                main(["sessions", "--help"])
+        self.assertEqual(raised.exception.code, 0)
+        rendered = output.getvalue()
+        self.assertIn("default: 20", rendered)
+        self.assertIn("older known session", rendered)
+
     def test_doctor_latest_json_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -54,6 +65,33 @@ class CliMvpTests(unittest.TestCase):
             rendered = output.getvalue()
             self.assertIn("Doctor:", rendered)
             self.assertNotIn('"schema_version"', rendered)
+
+    def test_doctor_healthy_human_output_is_narrowly_scoped_without_json_change(self) -> None:
+        healthy = {
+            "session": "/tmp/rollout.jsonl",
+            "status": "HEALTHY",
+            "findings": ["HEALTHY"],
+            "repository": {"cwd": None, "confidence": "unknown"},
+        }
+        human_output = io.StringIO()
+        with patch("codex_rescue.cli._doctor", return_value=healthy):
+            with contextlib.redirect_stdout(human_output):
+                self.assertEqual(main(["doctor", "rollout.jsonl"]), 0)
+        rendered = human_output.getvalue()
+        self.assertIn("Doctor: HEALTHY", rendered)
+        self.assertIn(
+            "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
+            "It does not validate Codex Desktop sidebar/index/Remote metadata or prove semantic completeness.",
+            rendered,
+        )
+
+        json_output = io.StringIO()
+        with patch("codex_rescue.cli._doctor", return_value=healthy):
+            with contextlib.redirect_stdout(json_output):
+                self.assertEqual(main(["doctor", "rollout.jsonl", "--json"]), 0)
+        envelope = json.loads(json_output.getvalue())
+        self.assertEqual(envelope["schema_version"], 1)
+        self.assertEqual(envelope["data"], healthy)
 
     def test_version_flag_is_available(self) -> None:
         output = io.StringIO()
