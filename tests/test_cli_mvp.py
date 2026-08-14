@@ -41,8 +41,10 @@ class CliMvpTests(unittest.TestCase):
                 main(["sessions", "--help"])
         self.assertEqual(raised.exception.code, 0)
         rendered = output.getvalue()
+        self.assertIn("bounded listing window", rendered)
         self.assertIn("default: 20", rendered)
         self.assertIn("older known session", rendered)
+        self.assertIn("does not prove a rollout is undiscoverable", rendered)
 
     def test_doctor_latest_json_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -81,7 +83,8 @@ class CliMvpTests(unittest.TestCase):
         self.assertIn("Doctor: HEALTHY", rendered)
         self.assertIn(
             "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
-            "It does not validate Codex Desktop sidebar/index/Remote metadata or prove semantic completeness.",
+            "It does not validate Codex Desktop sidebar/index/Remote metadata, prove semantic completeness, "
+            "or rule out every upstream Codex failure mode.",
             rendered,
         )
 
