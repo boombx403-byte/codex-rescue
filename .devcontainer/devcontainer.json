@@ -1,0 +1,37 @@
+{
+  "name": "Codex Rescue (Dev & Verification)",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.unittestArgs": [
+          "-v",
+          "-s",
+          "tests",
+          "-p",
+          "test_*.py"
+        ],
+        "python.testing.unittestEnabled": true,
+        "python.testing.pytestEnabled": false,
+        "python.testing.autoTestDiscoverOnSaveEnabled": true,
+        "terminal.integrated.env.linux": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      }
+    }
+  },
+  "containerEnv": {
+    "PYTHONPATH": "/workspaces/codex-rescue/src"
+  },
+  "postCreateCommand": "pip install --upgrade pip && pip install -e . && chmod +x scripts/*.sh 2>/dev/null || true",
+  "remoteUser": "vscode"
+}
