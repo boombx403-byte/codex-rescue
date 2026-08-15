@@ -49,6 +49,14 @@ class ParseResult:
     record_type_overflow: bool = False
     compaction_evidence_overflow: bool = False
     retained_event_bytes: int = 0
+    # In a paginated Codex rollout, a persisted physical record may carry a
+    # u64 ordinal.  A repeated ordinal is a narrow rollout-local finding;
+    # it is not proof of projection divergence, pagination failure, or
+    # thread-history corruption.
+    ordinal_mode: str | None = None
+    ordinal_reuse: list[dict[str, Any]] = field(default_factory=list)
+    ordinal_reuse_count: int = 0
+    ordinal_tracking_overflow: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +86,10 @@ class ParseResult:
             "record_type_overflow": self.record_type_overflow,
             "compaction_evidence_overflow": self.compaction_evidence_overflow,
             "retained_event_bytes": self.retained_event_bytes,
+            "ordinal_mode": self.ordinal_mode,
+            "ordinal_reuse": self.ordinal_reuse,
+            "ordinal_reuse_count": self.ordinal_reuse_count,
+            "ordinal_tracking_overflow": self.ordinal_tracking_overflow,
         }
 
 
@@ -131,6 +143,13 @@ MAX_OCCURRENCES_PER_ID = 2
 MAX_RECORD_TYPES = 1024
 MAX_RETAINED_EVENT_BYTES = 256 * 1024
 MAX_EVENT_TAIL_BYTES = 4 * 1024 * 1024
+# Complete duplicate detection needs historical state.  Keep that state
+# bounded; after the cap, adjacent duplicates remain detectable, while a
+# later non-adjacent duplicate is explicitly unknown via the overflow flag.
+# The cap covers the public real-style examples (about 55k ordinals) without
+# allowing an arbitrarily large Python set to grow with the rollout.
+MAX_ORDINAL_STATES = 65_536
+MAX_U64 = (1 << 64) - 1
 CORRUPTED_TOOL_NAME_SENTINEL = "<corrupted-tool-name>"
 
 
@@ -268,6 +287,9 @@ def parse_transcript(
     event_tail_sizes: deque[int] = deque()
     event_tail_bytes = 0
     invalid_seen = False
+    ordinal_positions: dict[int, int] = {}
+    last_ordinal: int | None = None
+    last_ordinal_offset: int | None = None
 
     with source.open("rb") as stream:
         while True:
@@ -316,6 +338,54 @@ def parse_transcript(
 
             payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
             kind = _record_kind(record)
+
+            # The first SessionMeta is the only safe mode discriminator.  The
+            # upstream SessionMeta schema defaults an omitted history_mode to
+            # legacy, so require an explicit paginated marker before applying
+            # ordinal semantics.  A malformed or future mode is unknown, not
+            # evidence of legacy semantics.
+            if record.get("type") == "session_meta" and result.ordinal_mode is None:
+                if "history_mode" not in payload:
+                    result.ordinal_mode = "legacy"
+                else:
+                    history_mode = payload.get("history_mode")
+                    result.ordinal_mode = history_mode if isinstance(history_mode, str) else "unknown"
+
+            if result.ordinal_mode == "paginated":
+                raw_ordinal = record.get("ordinal")
+                if (
+                    isinstance(raw_ordinal, int)
+                    and not isinstance(raw_ordinal, bool)
+                    and 0 <= raw_ordinal <= MAX_U64
+                ):
+                    ordinal = raw_ordinal
+                    first_offset = ordinal_positions.get(ordinal)
+                    if first_offset is not None or ordinal == last_ordinal:
+                        result.ordinal_reuse_count += 1
+                        if len(result.ordinal_reuse) < MAX_RETAINED_FINDINGS:
+                            result.ordinal_reuse.append(
+                                {
+                                    "ordinal": ordinal,
+                                    "first_offset": first_offset if first_offset is not None else last_ordinal_offset,
+                                    "duplicate_offset": start,
+                                    "reason": "persisted paginated ordinal was reused by another physical record",
+                                }
+                            )
+                    elif len(ordinal_positions) < MAX_ORDINAL_STATES:
+                        ordinal_positions[ordinal] = start
+                    else:
+                        result.ordinal_tracking_overflow = True
+                    last_ordinal = ordinal
+                    last_ordinal_offset = start
+                elif raw_ordinal is not None and len(result.operational_schema_issues) < MAX_RETAINED_FINDINGS:
+                    result.operational_schema_issues.append(
+                        {
+                            "offset": start,
+                            "outer_type": record.get("type"),
+                            "reason": "paginated rollout ordinal is not a u64",
+                        }
+                    )
+
             corrupted_tool_call = _corrupted_tool_call_metadata(payload, start)
             if corrupted_tool_call and len(result.corrupted_tool_calls) < MAX_RETAINED_FINDINGS:
                 result.corrupted_tool_calls.append(corrupted_tool_call)

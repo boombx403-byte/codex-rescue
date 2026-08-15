@@ -15,6 +15,8 @@ SEVERITY = [
     "TRUNCATED_TRANSCRIPT",
     "OVERSIZED_PAYLOAD",
     "UNKNOWN_OPERATIONAL_SCHEMA",
+    "PERSISTED_PAGINATED_ORDINAL_REUSE",
+    "ORDINAL_ANALYSIS_INCOMPLETE",
     "UNFINISHED_TOOL_CALL",
     "COMPACTION_STATE_LOSS",
     "REPO_STATE_DIVERGED",
@@ -49,6 +51,12 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         findings.add("OVERSIZED_PAYLOAD")
     if parsed.operational_schema_issues or parsed.correlation_ambiguities:
         findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
+    if parsed.ordinal_mode not in {None, "legacy", "paginated"}:
+        findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
+    if parsed.ordinal_reuse:
+        findings.add("PERSISTED_PAGINATED_ORDINAL_REUSE")
+    if parsed.ordinal_tracking_overflow:
+        findings.add("ORDINAL_ANALYSIS_INCOMPLETE")
     if parsed.unfinished_tool_calls:
         findings.add("UNFINISHED_TOOL_CALL")
     if parsed.compaction_state_loss:

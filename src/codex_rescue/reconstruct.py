@@ -177,6 +177,12 @@ def build_handoff(
         "corrupted_tool_calls": list(_get(parsed, "corrupted_tool_calls", ()) or ()),
         "correlation_ambiguities": list(_get(parsed, "correlation_ambiguities", ()) or ()),
         "operational_schema_issues": list(_get(parsed, "operational_schema_issues", ()) or ()),
+        # These fields carry only the narrow persisted paginated ordinal
+        # evidence. They do not assert projection divergence or repairability.
+        "ordinal_mode": _get(parsed, "ordinal_mode"),
+        "ordinal_reuse": list(_get(parsed, "ordinal_reuse", ()) or ()),
+        "ordinal_reuse_count": int(_get(parsed, "ordinal_reuse_count", 0) or 0),
+        "ordinal_tracking_overflow": bool(_get(parsed, "ordinal_tracking_overflow", False)),
         "corruption_class": doctor_status,
         "evidence_refs": [evidence("transcript", session_ref, "read-only source", transcript_hash)],
     }
@@ -212,9 +218,11 @@ def build_handoff(
         or bool(_get(parsed, "corrupted_tool_calls", ()))
         or bool(_get(parsed, "correlation_ambiguities", ()))
         or bool(_get(parsed, "operational_schema_issues", ()))
+        or bool(_get(parsed, "ordinal_reuse", ()))
+        or bool(_get(parsed, "ordinal_tracking_overflow", False))
         or doctor_status in {
             "CORRUPTED_TOOL_CALL", "MALFORMED_RECORD", "TRUNCATED_TRANSCRIPT", "UNKNOWN_CORRUPTION", "OVERSIZED_PAYLOAD",
-            "REPO_STATE_DIVERGED", "UNKNOWN_OPERATIONAL_SCHEMA",
+            "REPO_STATE_DIVERGED", "UNKNOWN_OPERATIONAL_SCHEMA", "PERSISTED_PAGINATED_ORDINAL_REUSE", "ORDINAL_ANALYSIS_INCOMPLETE",
         }
     )
     overall = "unknown" if blocking_unknown else ("reconstructed" if last_prompt else "unknown")
