@@ -1,15 +1,20 @@
 """Tier 1: Feature Area 3 - Tool Correlation & Sentinel Sanitization."""
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
-from codex_rescue.transcript import CORRUPTED_TOOL_NAME_SENTINEL, parse_transcript
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
 
-try:
-    from common import SyntheticRolloutGenerator, TempSessionWorkspace
-except ImportError:
-    from tests.e2e.common import SyntheticRolloutGenerator, TempSessionWorkspace
+from codex_rescue.transcript import CORRUPTED_TOOL_NAME_SENTINEL, parse_transcript
+from common import SyntheticRolloutGenerator, TempSessionWorkspace
 
 
 class TestArea3ToolCorrelationFeatures(unittest.TestCase):

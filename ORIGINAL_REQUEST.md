@@ -132,4 +132,51 @@ Key guidelines:
 4. **R4 Specialist (Packaging & NPM)**: Implements packaging verification, supply chain audit, and NPM shim.
 5. **Auditor & Challenger**: Adversarial invariant checker, verifies P1–P10 adherence and Linux/Codespaces portability.
 
+## 2026-08-15T07:24:47Z
 
+# Mission: Complete End-to-End Autonomous Validation & Delivery Campaign (A to Z)
+
+## Target Repository & Baseline
+- **Primary Private Remote**: `private` (`https://github.com/shleder/codex-rescue-private.git`)
+- **Upstream Remote**: `origin` (`https://github.com/shleder/codex-rescue.git`)
+- **Working Branch**: `test/day2-concurrency-and-stress`
+- **Current Head**: Milestone R1–R5 implemented (Concurrency, E2E Tiers 1-2, Fuzzing, Oracle, Scale/Soak, CLI, Packaging, 6/6 Fixtures).
+
+---
+
+## Autonomous Objectives (From A to Z)
+
+### 1. Adversarial Peer Review & Integrity Audit
+- Perform cross-agent adversarial challenger audit of all new test suites:
+  - `tests/test_concurrency_win32.py`
+  - `tests/e2e/tier1_features/` (10 modules)
+  - `tests/e2e/tier2_boundaries/` (10 modules)
+  - `tests/test_streaming_fuzzing.py`
+  - `tests/test_correlation_oracle.py`
+  - `tests/test_scale_soak.py`
+  - `tests/test_cli_blackbox.py`
+  - `tests/test_packaging_supplychain.py`
+- Verify that Safety Invariants P1–P10 are rigorously asserted with zero loose assumptions.
+
+### 2. Supply Chain & Packaging Quality Gate
+- Validate `pyproject.toml`, `MANIFEST.in`, and `npm-distribution/`.
+- Ensure zero external runtime dependencies are introduced (`dependencies = []`).
+- Verify `@codex-rescue/cli` pure JS launcher shim security (`npm-distribution/bin/codex-rescue.js`).
+
+### 3. Documentation & Final Deliverables Assembly
+- Verify and finalize `RELIABILITY_REPORT_28_SECTION.md`.
+- Update `CHANGELOG.md` and release notes if needed.
+
+### 4. Git & PR Packaging (End-to-End Delivery)
+- Commit any remaining clean-room polish.
+- Push all branches to `private` (`shleder/codex-rescue-private`) and `origin`.
+- Open / format a clean Pull Request description ready for review.
+- Provide a comprehensive final executive report to the user.
+
+---
+
+## Multi-Agent Team Structure
+1. **Lead Orchestrator**: Coordinates team, manages quality gates, and conducts final delivery.
+2. **Adversarial Auditor & Challenger**: Reviews test coverage, checks for weak assertions and edge cases.
+3. **Packaging & Security Specialist**: Audits supply chain, NPM shim, and standard library enforcement.
+4. **Documentation & Release Lead**: Reviews 28-section report and release artifacts.

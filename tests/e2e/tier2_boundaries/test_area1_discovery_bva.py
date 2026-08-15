@@ -1,15 +1,20 @@
 """Tier 2: Feature Area 1 BVA - Session Discovery Boundary Value Analysis."""
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
-from codex_rescue.discovery import discover_sessions, lightweight_scan, resolve_latest
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
 
-try:
-    from common import SyntheticRolloutGenerator, TempSessionWorkspace
-except ImportError:
-    from tests.e2e.common import SyntheticRolloutGenerator, TempSessionWorkspace
+from codex_rescue.discovery import discover_sessions, lightweight_scan, resolve_latest
+from common import SyntheticRolloutGenerator, TempSessionWorkspace
 
 
 class TestArea1DiscoveryBVA(unittest.TestCase):

@@ -9,11 +9,17 @@ Milestone R3 (Phases 46-52):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 
 class TestCLIBlackbox(unittest.TestCase):
@@ -21,7 +27,8 @@ class TestCLIBlackbox(unittest.TestCase):
 
     def _run_cli(self, *args: str) -> tuple[int, str, str]:
         cmd = [sys.executable, "-m", "codex_rescue.cli", *args]
-        env = dict(PYTHONPATH="src")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = "src"
         res = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return res.returncode, res.stdout, res.stderr
 
@@ -48,6 +55,10 @@ class TestCLIBlackbox(unittest.TestCase):
     def test_r3_cli_doctor_json_envelope_schema(self) -> None:
         """Verify codex-rescue doctor --json returns valid JSON envelope."""
         with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-q"], cwd=td, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=td, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=td, check=True)
+            subprocess.run(["git", "commit", "--allow-empty", "-qm", "initial"], cwd=td, check=True)
             p = Path(td) / "rollout-cli.jsonl"
             rec = {"timestamp": "2026-08-15T00:00:00Z", "type": "session_meta", "payload": {"id": "cli-1", "session_id": "cli-1", "cwd": td}}
             p.write_bytes(json.dumps(rec).encode("utf-8") + b"\n")
@@ -55,8 +66,9 @@ class TestCLIBlackbox(unittest.TestCase):
             code, out, _ = self._run_cli("doctor", str(p), "--json")
             self.assertEqual(code, 0)
             data = json.loads(out)
-            self.assertIn("status", data)
-            self.assertEqual(data["status"], "HEALTHY")
+            self.assertEqual(data.get("schema_version"), 1)
+            self.assertIn("data", data)
+            self.assertEqual(data["data"]["status"], "HEALTHY")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,21 @@
 """Tier 1: Feature Area 1 - Session Discovery & Head/Tail Scan."""
 from __future__ import annotations
 
+import sys
 import time
 import unittest
 from pathlib import Path
 
-from codex_rescue.discovery import discover_sessions, resolve_latest
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
 
-try:
-    from common import SyntheticRolloutGenerator, TempSessionWorkspace
-except ImportError:
-    from tests.e2e.common import SyntheticRolloutGenerator, TempSessionWorkspace
+from codex_rescue.discovery import discover_sessions, resolve_latest
+from common import SyntheticRolloutGenerator, TempSessionWorkspace
 
 
 class TestArea1DiscoveryFeatures(unittest.TestCase):

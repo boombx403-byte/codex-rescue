@@ -26,4 +26,11 @@ const child = spawnSync(pyExec, args, {
   },
 });
 
+if (child.error) {
+  console.error(
+    `[codex-rescue] Failed to execute ${pyExec}: ${child.error.message || child.error}\nPlease ensure Python 3.11+ is installed and available in PATH.`
+  );
+  process.exit(1);
+}
+
 process.exit(child.status !== null ? child.status : 1);

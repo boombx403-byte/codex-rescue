@@ -18,5 +18,8 @@ prune .codex-rescue
 prune .codex-rescue-final
 prune .codex-rescue-final-3
 prune .review-output
+prune .agents
+prune .devcontainer
+prune npm-distribution
 
 global-exclude *.pyc *.pyo __pycache__

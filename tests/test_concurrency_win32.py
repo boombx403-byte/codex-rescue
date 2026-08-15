@@ -31,6 +31,11 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterator
 from unittest.mock import patch
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from codex_rescue.artifacts import (
     _atomic_replace,
     _replace_retryable,

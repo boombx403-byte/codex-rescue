@@ -7,6 +7,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -26,8 +27,18 @@ def _remove_readonly(func: Any, path: str, _excinfo: Any) -> None:
 
 
 def _remove_git_dir(path: Path) -> None:
-    if path.exists():
-        shutil.rmtree(path, onerror=_remove_readonly)
+    if not path.exists():
+        return
+    for attempt in range(5):
+        try:
+            if path.exists():
+                shutil.rmtree(path, onerror=_remove_readonly)
+            return
+        except (PermissionError, FileNotFoundError, OSError):
+            if attempt < 4:
+                time.sleep(0.05)
+            else:
+                raise
 
 
 def _hash_tree_files(path: Path) -> dict[str, str]:

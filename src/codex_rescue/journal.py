@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+_JOURNAL_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -43,14 +46,15 @@ def append_entry(root: str | Path, entry: JournalEntry) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(asdict(entry), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     data = (payload + "\n").encode("utf-8")
-    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-    try:
-        written = 0
-        while written < len(data):
-            written += os.write(fd, data[written:])
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    with _JOURNAL_LOCK:
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            written = 0
+            while written < len(data):
+                written += os.write(fd, data[written:])
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     return path
 
 

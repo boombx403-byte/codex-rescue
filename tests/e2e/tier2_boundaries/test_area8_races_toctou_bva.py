@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import threading
 import unittest
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
 
 from codex_rescue.doctor import doctor_session
 from codex_rescue.journal import JournalEntry, append_entry, read_entries, utc_timestamp
 from codex_rescue.salvage import salvage_session
 from codex_rescue.transcript import parse_transcript
-
-try:
-    from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
-except ImportError:
-    from tests.e2e.common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
+from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
 
 
 class TestArea8RacesTOCTOUBVA(unittest.TestCase):

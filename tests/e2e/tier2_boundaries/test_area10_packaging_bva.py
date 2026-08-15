@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 import socket
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codex_rescue.cli import main
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
+
+from codex_rescue.cli import main
 
 
 class TestArea10PackagingBVA(unittest.TestCase):

@@ -2,20 +2,25 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
+
 from codex_rescue.doctor import doctor_session
 from codex_rescue.salvage import salvage_session
 from codex_rescue.transcript import parse_transcript
 import codex_rescue.salvage as salvage_mod
-
-try:
-    from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
-except ImportError:
-    from tests.e2e.common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
+from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace
 
 
 class TestArea5SalvageBVA(unittest.TestCase):

@@ -12,17 +12,24 @@ import hashlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Iterator
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from codex_rescue.discovery import lightweight_scan
 from codex_rescue.doctor import doctor_session
 from codex_rescue.salvage import file_sha256, salvage_session
 from codex_rescue.transcript import (
+    CORRUPTED_TOOL_NAME_SENTINEL,
     MAX_RECORD_BYTES,
-    CorruptedToolName,
     ParseResult,
     _read_line_bounded,
     parse_transcript,
@@ -93,20 +100,24 @@ class TestStreamingFuzzing(unittest.TestCase):
             p.write_bytes(content)
 
             parsed = parse_transcript(p)
-            self.assertEqual(len(parsed.history), 2)
-            self.assertEqual(parsed.history[0]["message"], "Step 1")
-            self.assertEqual(parsed.history[1]["message"], "Step 2")
+            self.assertEqual(len(parsed.events), 3)
+            self.assertEqual(parsed.events[1].payload["message"], "Step 1")
+            self.assertEqual(parsed.events[2].payload["message"], "Step 2")
 
     def test_r2_fuzz_utf8_bom_at_stream_start(self) -> None:
         """Verify leading UTF-8 BOM is transparently handled without corrupting first record."""
         with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-q"], cwd=td, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=td, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=td, check=True)
+            subprocess.run(["git", "commit", "--allow-empty", "-qm", "initial"], cwd=td, check=True)
             p = Path(td) / "rollout-bom.jsonl"
             rec = {"timestamp": "2026-08-15T00:00:00Z", "type": "session_meta", "payload": {"id": "bom-1", "session_id": "bom-1", "cwd": td}}
             p.write_bytes(b"\xef\xbb\xbf" + json.dumps(rec).encode("utf-8") + b"\n")
 
             doc = doctor_session(p)
             self.assertEqual(doc.status, "HEALTHY")
-            self.assertEqual(doc.transcript.session_id, "bom-1")
+            self.assertEqual(doc.transcript.session_metadata.get("id"), "bom-1")
 
     def test_r2_fuzz_nul_byte_halts_cleanly(self) -> None:
         """Verify embedded NUL byte halts stream at valid prefix and reports MALFORMED_RECORD."""
@@ -123,7 +134,7 @@ class TestStreamingFuzzing(unittest.TestCase):
 
             doc = doctor_session(p)
             self.assertIn("MALFORMED_RECORD", doc.findings)
-            self.assertEqual(len(doc.transcript.history), 1)
+            self.assertEqual(len(doc.transcript.events), 2)
 
     def test_r2_fuzz_control_character_sanitization_matrix(self) -> None:
         """Verify matrix of control characters in tool names are safely sanitized to sentinels (P4)."""
@@ -138,11 +149,11 @@ class TestStreamingFuzzing(unittest.TestCase):
                 p.write_bytes(json.dumps(rec_meta).encode("utf-8") + b"\n" + json.dumps(rec_call).encode("utf-8") + b"\n")
 
                 doc = doctor_session(p)
-                self.assertIn("CORRUPTED_TOOL_NAME", doc.findings)
+                self.assertIn("CORRUPTED_TOOL_CALL", doc.findings)
                 # Verify sentinel in transcript
-                call = doc.transcript.tool_calls.get("c1")
-                self.assertIsNotNone(call)
-                self.assertIsInstance(call.name, CorruptedToolName)
+                self.assertEqual(len(doc.transcript.events), 2)
+                self.assertEqual(doc.transcript.events[1].payload.get("name"), CORRUPTED_TOOL_NAME_SENTINEL)
+                self.assertEqual(len(doc.transcript.corrupted_tool_calls), 1)
 
     def test_r2_fuzz_extreme_line_length_drainage(self) -> None:
         """Verify lines exceeding 8MB MAX_RECORD_BYTES are safely drained and classified."""
@@ -159,7 +170,7 @@ class TestStreamingFuzzing(unittest.TestCase):
 
             doc = doctor_session(p)
             self.assertIn("OVERSIZED_PAYLOAD", doc.findings)
-            self.assertEqual(doc.transcript.session_id, "big-1")
+            self.assertEqual(doc.transcript.session_metadata.get("id"), "big-1")
 
 
 if __name__ == "__main__":

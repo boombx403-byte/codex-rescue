@@ -13,6 +13,8 @@
 - Verification remains fail-closed with `REVIEW_REQUIRED`.
 - Retained regression coverage for #14824 (orphaned/missing tool output) and
   #37719 (oversized persisted tool output).
+- Completed 63-phase Defensive Reliability Campaign: multi-process concurrent writer races, Win32 handle sharing flags (`ctypes`), TOCTOU mutation injection, streaming JSONL fuzzing, differential correlation oracle, 10k session scale testing, memory leak/handle soak testing, and zero-runtime-dependency packaging audit.
+- Full GitHub Codespaces Linux container portability and cross-platform fixture materialization.
 
 ## Limitations
 

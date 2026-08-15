@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 
-try:
-    from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace, run_cli_command
-except ImportError:
-    from tests.e2e.common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace, run_cli_command
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_SRC_DIR = _REPO_ROOT / "src"
+_E2E_DIR = _REPO_ROOT / "tests" / "e2e"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_E2E_DIR) not in sys.path:
+    sys.path.insert(0, str(_E2E_DIR))
+
+from common import MockGitRepo, SyntheticRolloutGenerator, TempSessionWorkspace, run_cli_command
 
 
 class TestArea9CLIEnvelopesFeatures(unittest.TestCase):

@@ -9,16 +9,20 @@ Milestone R2 (Phases 10-12):
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from codex_rescue.doctor import doctor_session
 from codex_rescue.transcript import (
-    CallEvent,
-    CompletedToolPair,
-    OutputEvent,
+    TranscriptEvent,
     ParseResult,
     parse_transcript,
 )
@@ -93,7 +97,7 @@ class TestCorrelationOracle(unittest.TestCase):
             {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "ok"}},
             {"type": "response_item", "payload": {"type": "custom_tool_call", "name": "sql", "call_id": "c2", "arguments": "{}"}},
             {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output": "ok"}},
-            {"type": "response_item", "payload": {"type": "tool_search_call", "call_id": "c3", "query": "find"}},
+            {"type": "response_item", "payload": {"type": "tool_search_call", "name": "tool_search", "call_id": "c3", "query": "find"}},
             {"type": "response_item", "payload": {"type": "tool_search_output", "call_id": "c3", "output": "found"}},
         ]
 
@@ -115,9 +119,10 @@ class TestCorrelationOracle(unittest.TestCase):
                     f.write(json.dumps(r).encode("utf-8") + b"\n")
 
             parsed = parse_transcript(p)
-            self.assertEqual(len(parsed.completed_pairs), 3)
-            self.assertEqual(len(parsed.tool_calls), 0)
-            self.assertFalse(parsed.has_correlation_ambiguity)
+            self.assertEqual(len(parsed.unfinished_tool_calls), 0)
+            self.assertEqual(len(parsed.correlation_ambiguities), 0)
+            self.assertIsNone(parsed.corruption_class)
+            self.assertEqual(parsed.valid_record_count, 7)
 
     def test_r2_oracle_cross_family_rejection(self) -> None:
         """Verify oracle and production both reject function_call paired with custom_tool_output."""
@@ -143,14 +148,15 @@ class TestCorrelationOracle(unittest.TestCase):
                     f.write(json.dumps(r).encode("utf-8") + b"\n")
 
             parsed = parse_transcript(p)
-            self.assertTrue(parsed.has_correlation_ambiguity)
-            self.assertEqual(len(parsed.completed_pairs), 0)
+            self.assertTrue(len(parsed.correlation_ambiguities) > 0)
+            self.assertEqual(len(parsed.unfinished_tool_calls), 1)
 
     def test_r2_oracle_duplicate_call_id_detection(self) -> None:
         """Verify oracle and production flag duplicate call_ids as correlation ambiguity."""
         records = [
             {"type": "response_item", "payload": {"type": "function_call", "name": "shell", "call_id": "dup_1", "arguments": "{}"}},
             {"type": "response_item", "payload": {"type": "function_call", "name": "shell2", "call_id": "dup_1", "arguments": "{}"}},
+            {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "dup_1", "output": "ok"}},
         ]
 
         oracle = DifferentialCorrelationOracle()
@@ -168,7 +174,7 @@ class TestCorrelationOracle(unittest.TestCase):
                     f.write(json.dumps(r).encode("utf-8") + b"\n")
 
             parsed = parse_transcript(p)
-            self.assertTrue(parsed.has_correlation_ambiguity)
+            self.assertTrue(len(parsed.correlation_ambiguities) > 0)
 
 
 if __name__ == "__main__":
