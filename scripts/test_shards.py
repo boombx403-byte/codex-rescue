@@ -30,6 +30,9 @@ SHARDS: Final[dict[str, tuple[str, ...]]] = {
     "DOCTOR_TRANSCRIPT": (
         "tests.test_doctor",
     ),
+    "ORDINAL": (
+        "tests.test_ordinals",
+    ),
     "SALVAGE_VERIFY": (
         "tests.test_adversarial",
         "tests.test_artifacts_verify",
