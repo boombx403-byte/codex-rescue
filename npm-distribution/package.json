@@ -1,0 +1,16 @@
+{
+  "name": "@codex-rescue/cli",
+  "version": "0.1.0-alpha.3",
+  "description": "Defensive diagnostic and recovery CLI for persisted OpenAI Codex sessions",
+  "bin": {
+    "codex-rescue": "./bin/codex-rescue.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "private": true
+}
