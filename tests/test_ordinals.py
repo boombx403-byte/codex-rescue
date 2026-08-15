@@ -224,9 +224,12 @@ class OrdinalDiagnosticsTests(unittest.TestCase):
 
     def test_malformed_ordinal_values_are_unknown_not_reuse(self) -> None:
         invalid_records: list[dict[str, object]] = []
-        for value in ("7", -1, True, 1 << 64):
+        for value in (None, "7", -1, True, 1 << 64):
             record = dict(_task_started(7))
-            record["ordinal"] = value  # type: ignore[assignment]
+            if value is None:
+                record.pop("ordinal")
+            else:
+                record["ordinal"] = value  # type: ignore[assignment]
             invalid_records.append(record)
         _, result = self._run([_session_meta(), *invalid_records])
         self.assertEqual(result.status, "UNKNOWN_OPERATIONAL_SCHEMA")

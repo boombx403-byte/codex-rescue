@@ -377,12 +377,16 @@ def parse_transcript(
                         result.ordinal_tracking_overflow = True
                     last_ordinal = ordinal
                     last_ordinal_offset = start
-                elif raw_ordinal is not None and len(result.operational_schema_issues) < MAX_RETAINED_FINDINGS:
+                elif len(result.operational_schema_issues) < MAX_RETAINED_FINDINGS:
                     result.operational_schema_issues.append(
                         {
                             "offset": start,
                             "outer_type": record.get("type"),
-                            "reason": "paginated rollout ordinal is not a u64",
+                            "reason": (
+                                "paginated rollout record is missing an ordinal"
+                                if raw_ordinal is None
+                                else "paginated rollout ordinal is not a u64"
+                            ),
                         }
                     )
 
