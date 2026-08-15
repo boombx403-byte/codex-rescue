@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import unittest
 from pathlib import Path
@@ -11,6 +12,17 @@ FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
 
 class FixturePortabilityTests(unittest.TestCase):
+    def test_fixture_session_cwds_use_portable_separators(self) -> None:
+        """Synthetic relative cwd values must work on Windows and POSIX hosts."""
+        for session in FIXTURES_DIR.glob("*/source_session/*.jsonl"):
+            first_line = session.read_bytes().splitlines()[0]
+            record = json.loads(first_line)
+            payload = record.get("payload", {})
+            cwd = payload.get("cwd")
+            if isinstance(cwd, str) and not Path(cwd).is_absolute():
+                with self.subTest(session=str(session)):
+                    self.assertNotIn("\\", cwd)
+
     def test_fixtures_are_plain_snapshots_and_materialize_cleanly(self) -> None:
         self.assertTrue(FIXTURES_DIR.exists(), "fixtures directory missing")
         fixture_dirs = [d for d in FIXTURES_DIR.iterdir() if d.is_dir()]
