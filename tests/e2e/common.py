@@ -74,7 +74,7 @@ class SyntheticRolloutGenerator:
         session_id: str = "sess-e2e-001",
         cwd: str = "C:/test/repo",
         originator: str = "codex_cli",
-        cli_version: str = "0.1.0a3",
+        cli_version: str = "0.1.0a4",
         timestamp: str = "2026-08-14T20:00:00.000Z",
     ) -> dict[str, Any]:
         return {

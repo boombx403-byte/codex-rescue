@@ -76,7 +76,7 @@ def run_e2e(
     json_report_path: str | None = None,
 ) -> int:
     """Run E2E suite with pre/post immutability verification and telemetry."""
-    print(f"=== Codex Rescue (0.1.0a3) E2E Test Runner ===")
+    print(f"=== Codex Rescue (0.1.0a4) E2E Test Runner ===")
     print(f"Target: Tier={tier}, Area={area or 'all'}, Verbosity={'verbose' if verbose else 'normal'}")
 
     # 1. Pre-execution SHA-256 tree hashing
@@ -111,7 +111,7 @@ def run_e2e(
     passed = total_tests - len(result.failures) - len(result.errors) - len(result.skipped)
 
     telemetry: dict[str, Any] = {
-        "version": "0.1.0a3",
+        "version": "0.1.0a4",
         "tier": tier,
         "area": area,
         "total_tests": total_tests,
