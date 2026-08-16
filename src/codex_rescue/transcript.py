@@ -135,7 +135,13 @@ _OUTPUT_FAMILIES = {
     "custom_tool_call_output": "custom_tool_call",
     "tool_search_output": "tool_search_call",
 }
-_KNOWN_OPERATIONAL_TYPES = _CALL_FAMILIES | set(_OUTPUT_FAMILIES)
+# mcp_tool_call_end is a current-format terminal record.  It carries the
+# identity of an MCP call, but it is not itself a call or an output that this
+# parser can safely correlate.  Recognize the record narrowly so a valid end
+# marker is not reported as an unknown schema or fabricated as an unfinished
+# call.
+_KNOWN_OPERATIONAL_TYPES = _CALL_FAMILIES | set(_OUTPUT_FAMILIES) | {"mcp_tool_call_end"}
+_OPERATIONAL_ENVELOPES = {"event_msg", "response_item"}
 MAX_RECORD_BYTES = 8 * 1024 * 1024
 MAX_RETAINED_FINDINGS = 128
 MAX_CORRELATION_STATES = 1024
@@ -197,9 +203,10 @@ def _corrupted_tool_call_metadata(
 def _operational_schema_issue(payload: dict[str, Any], outer_type: object, offset: int) -> dict[str, Any] | None:
     """Return an issue for an operational envelope we cannot correlate.
 
-    Ordinary future message types are intentionally tolerated.  Anything
-    that advertises itself as a tool/call/output, however, must either use a
-    known family and carry a stable id or be treated as unknown evidence.
+    Ordinary future message types are intentionally tolerated.  A record
+    advertising itself as a tool/call/output, or a future/event-named record
+    with a stable identity in an operational envelope, must either use a
+    known family or be treated as unknown evidence.
     """
 
     kind = payload.get("type")
@@ -212,11 +219,26 @@ def _operational_schema_issue(payload: dict[str, Any], outer_type: object, offse
         }
     if not isinstance(kind, str):
         return None
+    operational_identity = (
+        payload.get("call_id")
+        or (payload.get("id") if outer_type in _OPERATIONAL_ENVELOPES else None)
+    )
     looks_operational = (
         kind in _KNOWN_OPERATIONAL_TYPES
         or kind.endswith("_call")
         or kind.endswith("_output")
         or "tool" in kind.lower()
+        # A future/event-named record in a current operational envelope that
+        # carries a stable identity materially participates in diagnosis even
+        # when its type name does not advertise "call" or "tool".  Extra
+        # metadata on a known record does not enter this path.
+        or (
+            bool(operational_identity)
+            and (
+                "event" in kind.lower()
+                or kind.lower().startswith(("future_", "unknown_"))
+            )
+        )
     )
     if not looks_operational:
         return None

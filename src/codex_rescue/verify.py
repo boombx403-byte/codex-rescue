@@ -164,9 +164,8 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
     try:
         actual = inspect_git_state(cwd)
     except GitStateError as exc:
-        if source_review_reasons:
-            return VerifyResult("STATE_DIVERGED", (str(exc),), tuple(source_review_reasons))
-        return VerifyResult("STATE_DIVERGED", (str(exc),), ())
+        reasons = tuple(source_review_reasons) + (str(exc),)
+        return VerifyResult("REVIEW_REQUIRED", (), reasons)
     conflicts = compare_git_state(repository, actual)
     conflicts.extend(source_conflicts)
     if conflicts:

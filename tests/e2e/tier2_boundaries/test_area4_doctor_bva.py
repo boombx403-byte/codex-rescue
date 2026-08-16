@@ -80,8 +80,8 @@ class TestArea4DoctorBVA(unittest.TestCase):
             self.assertIsNotNone(res.status)
             self.assertIn(res.status, ("TRUNCATED_TRANSCRIPT", "UNKNOWN_CORRUPTION", "HEALTHY", "REPO_STATE_DIVERGED"))
 
-    def test_e2e_t2_doctor_git_diverged_findings(self) -> None:
-        """Verify corrupted or invalid Git repository raises GitStateError and flags REPO_STATE_DIVERGED."""
+    def test_e2e_t2_doctor_git_unavailable_not_diverged(self) -> None:
+        """Verify an invalid Git repository remains unknown rather than proving divergence."""
         with TempSessionWorkspace() as ws:
             # Create a broken .git file where git expects a directory or valid gitdir
             corrupt_git_dir = ws.root / "corrupt_git_repo"
@@ -95,8 +95,9 @@ class TestArea4DoctorBVA(unittest.TestCase):
             p = ws.create_session("git-dirty-doc", records=records)
 
             res = doctor_session(p)
-            self.assertEqual(res.status, "REPO_STATE_DIVERGED")
-            self.assertIn("REPO_STATE_DIVERGED", res.findings)
+            self.assertEqual(res.status, "HEALTHY")
+            self.assertNotIn("REPO_STATE_DIVERGED", res.findings)
+            self.assertEqual(res.repository.get("confidence"), "unknown")
 
 
 if __name__ == "__main__":

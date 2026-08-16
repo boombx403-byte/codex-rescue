@@ -68,7 +68,9 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         try:
             repository = inspect_git_state(cwd).to_dict()
         except GitStateError as exc:
-            findings.add("REPO_STATE_DIVERGED")
+            # An unavailable/non-Git repository is not evidence of divergence.
+            # Keep the repository evidence explicitly unknown while retaining
+            # the rollout-only meaning of HEALTHY.
             repository = {"cwd": cwd, "error": str(exc), "confidence": "unknown"}
     else:
         repository = {"cwd": None, "confidence": "unknown"}
