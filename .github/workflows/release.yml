@@ -1,4 +1,4 @@
-name: Publish Alpha 3 to PyPI
+name: Publish Alpha 4 to PyPI
 
 on:
   workflow_dispatch:
@@ -6,17 +6,19 @@ on:
       release_tag:
         description: "Published GitHub prerelease tag"
         required: true
-        default: "v0.1.0-alpha.3"
+        default: "v0.1.0-alpha.4"
       expected_version:
         description: "PyPI version encoded in the exact assets"
         required: true
-        default: "0.1.0a3"
+        default: "0.1.0a4"
       wheel_sha256:
         description: "SHA256 of the validated wheel asset"
         required: true
+        default: "828763F50C68146F1EACF9DB5845E079205E9E01AE3F357A858AC24174EDC33E"
       sdist_sha256:
         description: "SHA256 of the validated sdist asset"
         required: true
+        default: "131431E41EEFB9D6C84313E46C1065792C5A5E2440A9CAEB48C243077D1CD803"
 
 jobs:
   publish:
@@ -27,6 +29,12 @@ jobs:
       id-token: write
     environment:
       name: pypi
+    env:
+      QUALIFIED_RELEASE_TAG: v0.1.0-alpha.4
+      QUALIFIED_COMMIT_SHA: 41d95ac0921a3a56dfb118eabcb6bf9d35e64b2f
+      QUALIFIED_VERSION: 0.1.0a4
+      QUALIFIED_WHEEL_SHA256: 828763F50C68146F1EACF9DB5845E079205E9E01AE3F357A858AC24174EDC33E
+      QUALIFIED_SDIST_SHA256: 131431E41EEFB9D6C84313E46C1065792C5A5E2440A9CAEB48C243077D1CD803
 
     steps:
       - name: Checkout exact tagged commit
@@ -42,8 +50,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$RELEASE_TAG" = "$QUALIFIED_RELEASE_TAG"
+          test "$EXPECTED_VERSION" = "$QUALIFIED_VERSION"
           expected="$(git rev-parse "${RELEASE_TAG}^{commit}")"
-          test "$(git rev-parse HEAD)" = "$expected"
+          test "$expected" = "$QUALIFIED_COMMIT_SHA"
+          test "$(git rev-parse HEAD)" = "$QUALIFIED_COMMIT_SHA"
           python3 - <<'PY'
           import os
           import re
@@ -77,8 +88,8 @@ jobs:
           from pathlib import Path
 
           data = json.loads(Path("release.json").read_text(encoding="utf-8"))
-          expected_tag = os.environ["RELEASE_TAG"]
-          version = os.environ["EXPECTED_VERSION"]
+          expected_tag = os.environ["QUALIFIED_RELEASE_TAG"]
+          version = os.environ["QUALIFIED_VERSION"]
           expected_assets = {
               f"codex_rescue-{version}-py3-none-any.whl",
               f"codex_rescue-{version}.tar.gz",
@@ -88,13 +99,21 @@ jobs:
               raise SystemExit("release must be a published prerelease")
           if data.get("tag_name") != expected_tag or data.get("name") != expected_name:
               raise SystemExit("prerelease tag/title mismatch")
+          if data.get("target_commitish") != os.environ["QUALIFIED_COMMIT_SHA"]:
+              raise SystemExit("prerelease target mismatch")
           assets = data.get("assets", [])
           names = [asset.get("name") for asset in assets]
           if set(names) != expected_assets or len(names) != len(expected_assets):
               raise SystemExit(f"prerelease assets mismatch: {names!r}")
+          expected_digests = {
+              f"codex_rescue-{version}-py3-none-any.whl": "sha256:" + os.environ["QUALIFIED_WHEEL_SHA256"].lower(),
+              f"codex_rescue-{version}.tar.gz": "sha256:" + os.environ["QUALIFIED_SDIST_SHA256"].lower(),
+          }
           for asset in assets:
               if asset["name"] not in expected_assets or not asset.get("id"):
                   raise SystemExit("prerelease asset metadata is incomplete")
+              if asset.get("digest") != expected_digests[asset["name"]]:
+                  raise SystemExit(f"prerelease asset digest mismatch: {asset['name']!r}")
           PY
 
           python3 - <<'PY'
@@ -127,10 +146,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          wheel="dist/codex_rescue-${EXPECTED_VERSION}-py3-none-any.whl"
-          sdist="dist/codex_rescue-${EXPECTED_VERSION}.tar.gz"
-          printf '%s  %s\n' "$WHEEL_SHA256" "$wheel" | sha256sum -c -
-          printf '%s  %s\n' "$SDIST_SHA256" "$sdist" | sha256sum -c -
+          test "$EXPECTED_VERSION" = "$QUALIFIED_VERSION"
+          test "$WHEEL_SHA256" = "$QUALIFIED_WHEEL_SHA256"
+          test "$SDIST_SHA256" = "$QUALIFIED_SDIST_SHA256"
+          wheel="dist/codex_rescue-${QUALIFIED_VERSION}-py3-none-any.whl"
+          sdist="dist/codex_rescue-${QUALIFIED_VERSION}.tar.gz"
+          printf '%s  %s\n' "$QUALIFIED_WHEEL_SHA256" "$wheel" | sha256sum -c -
+          printf '%s  %s\n' "$QUALIFIED_SDIST_SHA256" "$sdist" | sha256sum -c -
           python3 -m pip install --disable-pip-version-check twine
           python3 -m twine check "$wheel" "$sdist"
 
