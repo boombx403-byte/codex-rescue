@@ -72,13 +72,14 @@ class TestArea4DoctorBVA(unittest.TestCase):
                 self.assertGreater(len(res.transcript.malformed_tool_arguments), 0)
 
     def test_e2e_t2_doctor_0byte_file(self) -> None:
-        """Verify 0-byte rollout file produces safe diagnostic result without unhandled exception."""
+        """Verify 0-byte rollout is explicitly incomplete without being treated as corruption."""
         with TempSessionWorkspace() as ws:
             empty_file = ws.create_session("empty-doc", content_bytes=b"")
 
             res = doctor_session(empty_file)
-            self.assertIsNotNone(res.status)
-            self.assertIn(res.status, ("TRUNCATED_TRANSCRIPT", "UNKNOWN_CORRUPTION", "HEALTHY", "REPO_STATE_DIVERGED"))
+            self.assertEqual(res.status, "INCOMPLETE_ROLLOUT")
+            self.assertIn("INCOMPLETE_ROLLOUT", res.findings)
+            self.assertNotIn("MALFORMED_RECORD", res.findings)
 
     def test_e2e_t2_doctor_git_unavailable_not_diverged(self) -> None:
         """Verify an invalid Git repository remains unknown rather than proving divergence."""
