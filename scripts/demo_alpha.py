@@ -1,4 +1,4 @@
-"""Codex Rescue v0.1.0-alpha.2 deterministic demo.
+"""Codex Rescue Alpha5 deterministic demo.
 
 Uses the kill_apply_patch synthetic fixture to demonstrate:
   doctor  -> identifies UNFINISHED_TOOL_CALL
@@ -23,6 +23,7 @@ _src = _repo / "src"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
+from codex_rescue import __version__
 from codex_rescue.doctor import doctor_session
 from codex_rescue.fixtures import materialize_fixture_git_repo
 from codex_rescue.salvage import salvage_session
@@ -41,7 +42,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     print("=" * 60)
-    print("Codex Rescue v0.1.0-alpha.2 -- Deterministic Demo")
+    print(f"Codex Rescue {__version__} -- Deterministic Demo")
     print("=" * 60)
     print()
 
