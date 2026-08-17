@@ -55,21 +55,32 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertIn("contents: read", default_permissions)
         self.assertIn("actions: read", default_permissions)
         self.assertNotIn("id-token: write", default_permissions)
-        self.assertGreaterEqual(text.count("actions: read"), 4)
+        self.assertGreaterEqual(text.count("actions: read"), 3)
         self.assertIn(f"EXPECTED_TAG: {TAG}", text)
         self.assertIn(f"EXPECTED_PYTHON_VERSION: {PYTHON_VERSION}", text)
         self.assertIn(f"EXPECTED_NPM_VERSION: {NPM_VERSION}", text)
         self.assertIn("candidate_run_id:", text)
         self.assertIn("candidate run head SHA mismatch", text)
         self.assertIn("GitHub asset digest mismatch", text)
-        self.assertIn("STOP: PyPI codex-rescue 0.1.0a5 already exists", text)
+        self.assertNotIn("PyPI", text)
         self.assertIn("npm whoami", text)
+        self.assertIn("publish-npm-platforms:", text)
+        self.assertIn("needs: verify-release", text)
+        self.assertNotIn("publish-pypi:", text)
+        self.assertNotIn("needs: publish-pypi", text)
+        self.assertNotIn("pypa/gh-action-pypi-publish", text)
+        self.assertIn("Publish and verify platform packages in deterministic order", text)
+        self.assertIn("verify_public_package codex-rescue-linux-x64", text)
         self.assertIn("publish-npm-meta:", text)
         self.assertIn("needs: publish-npm-platforms", text)
-        self.assertIn(
-            "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
-            text,
-        )
+
+    def test_alpha5_publish_policy_is_npm_only(self) -> None:
+        handoff = (ROOT / "docs/alpha5-release-handoff.md").read_text(encoding="utf-8")
+        self.assertIn("PYPI_ALPHA5_POLICY: NOT_PUBLISHED", handoff)
+        self.assertIn("GitHub Release / standalone native binaries", handoff)
+        self.assertIn("npx codex-rescue@0.1.0-alpha.5", handoff)
+        self.assertNotIn("PyPI exposes exactly `codex-rescue==0.1.0a5`", handoff)
+        self.assertNotIn("pipx install codex-rescue==0.1.0a5", handoff)
 
     def test_release_candidate_is_manual_and_requires_exact_artifact_set(self) -> None:
         text = (ROOT / ".github/workflows/alpha5-release-candidate.yml").read_text(encoding="utf-8")
