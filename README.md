@@ -18,7 +18,7 @@ Alpha5 targets the following command:
 npx codex-rescue@0.1.0-alpha.5 --help
 ```
 
-**UNVERIFIED / prerelease target:** the npm package names, native binaries, tarballs, and registry availability are not considered qualified until the Alpha5 native/npm CI matrix and manual registry-name preflight pass. The repository does not claim that this command is currently publishable or available from npm.
+**PRE-RELEASE / NOT YET PUBLISHED:** Alpha5 packaging has been exercised by the cross-platform native/npm CI and the registry-name preflight is designed to fail closed. Release still requires the current exact PR head to have all required CI green, and npm publisher authentication/ownership must be verified immediately before publication. This command is not expected to work from the public npm registry until Alpha5 is actually published.
 
 The npm design does not install Python. A small Node launcher selects an installed platform package and starts its bundled standalone executable. It has no runtime binary downloader, no `curl | shell` path, no telemetry, and no `shell=true` execution.
 
@@ -31,7 +31,7 @@ npm install -g codex-rescue@0.1.0-alpha.5
 codex-rescue --help
 ```
 
-This is subject to the same **UNVERIFIED prerelease** qualification boundary as the `npx` path above.
+This remains a prerelease target and is not expected to work from the public npm registry until Alpha5 is actually published.
 
 ## pipx
 
@@ -211,7 +211,7 @@ Standalone/npm qualification targets:
 - macOS arm64;
 - macOS x64/Intel while the GitHub Intel runner is available.
 
-**Native/npm support remains UNVERIFIED until the corresponding CI jobs actually succeed.** A workflow target is not proof that a binary runs.
+These targets have been exercised by the Alpha5 native/npm CI. Release support is qualified only when the current exact release-source SHA has the required jobs green; historical green runs do not qualify a later SHA.
 
 ## Safety model
 
@@ -280,8 +280,8 @@ Alpha5 currently performs an additional bounded linear scan for these aggregates
 
 ## Known limitations
 
-- Alpha5 code and tests in the preparation branch are not runtime-verified until Actions complete successfully.
-- npm package-name availability/ownership is not assumed; manual registry preflight is required before release.
+- Release qualification is exact-SHA: a later commit is unqualified until its required Actions complete successfully.
+- npm registry-name availability is rechecked by preflight; authenticated publisher identity/rights are still verified immediately before release.
 - No Alpha5 package, native binary, npm package, GitHub tag, or release is published by ordinary PR CI.
 - Projection parity only applies when a stable thread identity, paginated rollout evidence, supported session root, readable compatible state, and trustworthy byte boundary are available.
 - A missing projection DB is not a defect. A malformed/ambiguous projection store fails closed rather than being repaired.
