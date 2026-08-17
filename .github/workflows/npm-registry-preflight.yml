@@ -1,0 +1,24 @@
+name: NPM Registry Name Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-provisional-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: Check provisional package names
+        run: node scripts/check_npm_names.mjs
+      - name: Record qualification boundary
+        if: always()
+        run: |
+          echo "This workflow does not publish packages." >> "$GITHUB_STEP_SUMMARY"
+          echo "A registered name requires independent ownership verification before release." >> "$GITHUB_STEP_SUMMARY"
