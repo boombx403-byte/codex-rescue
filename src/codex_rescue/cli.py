@@ -12,8 +12,9 @@ from .verify import verify_rescue
 
 HEALTHY_EXPLANATION = (
     "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
-    "Projection parity is reported separately and may be not-applicable when no compatible read-only state is available. "
-    "HEALTHY does not prove semantic completeness or rule out every upstream Codex failure mode."
+    "It does not validate Codex Desktop sidebar/index/Remote metadata, prove semantic completeness, "
+    "or rule out every upstream Codex failure mode. "
+    "Projection parity may be not-applicable when no compatible read-only state is available."
 )
 
 
@@ -104,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         default=20,
         help=(
             "bounded listing window after rollout + read-only SQLite inventory correlation (default: 20); "
-            "increase when checking an older known session"
+            "increase when checking an older known session; limit exhaustion does not prove a rollout is undiscoverable"
         ),
     )
     sessions.add_argument("--latest", action="store_true")
