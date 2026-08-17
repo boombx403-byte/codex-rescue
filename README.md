@@ -10,46 +10,39 @@ The core commands are `sessions`, `doctor`, `salvage`, and `verify`. Alpha5 adds
 
 Codex Rescue does **not** fix upstream Codex transport, Desktop renderer, API, compaction-service, locking, or authentication bugs.
 
-## Fastest npm/npx install
+## Alpha5 official installation
 
-Alpha5 targets the following command:
+### npm/npx
+
+Alpha5 is distributed through npm/npx:
 
 ```bash
 npx codex-rescue@0.1.0-alpha.5 --help
 ```
 
-**PRE-RELEASE / NOT YET PUBLISHED:** Alpha5 packaging has been exercised by the cross-platform native/npm CI and the registry-name preflight is designed to fail closed. Release still requires the current exact PR head to have all required CI green, and npm publisher authentication/ownership must be verified immediately before publication. This command is not expected to work from the public npm registry until Alpha5 is actually published.
-
 The npm design does not install Python. A small Node launcher selects an installed platform package and starts its bundled standalone executable. It has no runtime binary downloader, no `curl | shell` path, no telemetry, and no `shell=true` execution.
 
 ## Global npm install
-
-Alpha5 target:
 
 ```bash
 npm install -g codex-rescue@0.1.0-alpha.5
 codex-rescue --help
 ```
 
-This remains a prerelease target and is not expected to work from the public npm registry until Alpha5 is actually published.
+## Standalone GitHub Release
 
-## pipx
+The Alpha5 GitHub prerelease contains standalone binaries for Linux x64,
+Windows x64, macOS arm64, and macOS x64. Use the matching binary from the
+`v0.1.0-alpha.5` GitHub Release when npm is not suitable.
 
-Python remains the canonical implementation. Alpha5 target:
+## Python development
 
-```bash
-pipx install codex-rescue==0.1.0a5
-codex-rescue --help
-```
-
-Until Alpha5 is actually released to PyPI, install from a checked-out source branch for development instead of assuming the version exists on the registry.
-
-## pip
-
-Alpha5 target:
+Python remains the canonical implementation and is still covered by tests and
+build qualification. PyPI is intentionally **not** an Alpha5 distribution
+channel; use a checked-out source branch for Python development:
 
 ```bash
-python -m pip install codex-rescue==0.1.0a5
+python -m pip install -e .
 codex-rescue --help
 ```
 
@@ -282,7 +275,7 @@ Alpha5 currently performs an additional bounded linear scan for these aggregates
 
 - Release qualification is exact-SHA: a later commit is unqualified until its required Actions complete successfully.
 - npm registry-name availability is rechecked by preflight; authenticated publisher identity/rights are still verified immediately before release.
-- No Alpha5 package, native binary, npm package, GitHub tag, or release is published by ordinary PR CI.
+- Ordinary PR CI does not publish Alpha5 packages, create a tag, or merge a PR.
 - Projection parity only applies when a stable thread identity, paginated rollout evidence, supported session root, readable compatible state, and trustworthy byte boundary are available.
 - A missing projection DB is not a defect. A malformed/ambiguous projection store fails closed rather than being repaired.
 - Discovery is bounded to supported rollout roots and immediate Codex-home database candidates; it is not an arbitrary whole-disk crawler.
@@ -298,11 +291,12 @@ Alpha5 currently performs an additional bounded linear scan for these aggregates
 
 | Distribution surface | Alpha5 version |
 |---|---|
-| Python package | `0.1.0a5` |
+| Python implementation/build version | `0.1.0a5` (not a PyPI Alpha5 channel) |
 | npm top/platform packages | `0.1.0-alpha.5` |
 | Intended GitHub tag | `v0.1.0-alpha.5` |
 
-The intended tag is a mapping convention only. Alpha5 preparation must not create the tag before qualification/release authorization.
+The Alpha5 tag is `v0.1.0-alpha.5` and remains bound to the qualified release
+source. Do not move or recreate it.
 
 ## Development/testing
 

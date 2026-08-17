@@ -120,48 +120,14 @@ jobs:
               actual=hashlib.sha256((Path('release-assets')/name).read_bytes()).hexdigest()
               if actual != digest: raise SystemExit(f'downloaded release asset hash mismatch: {name}')
           PY
-      - name: Stop if PyPI Alpha5 already exists
-        run: |
-          python - <<'PY'
-          import urllib.error, urllib.request
-          url='https://pypi.org/pypi/codex-rescue/0.1.0a5/json'
-          try:
-              with urllib.request.urlopen(url, timeout=20) as response:
-                  if response.status == 200: raise SystemExit('STOP: PyPI codex-rescue 0.1.0a5 already exists')
-          except urllib.error.HTTPError as exc:
-              if exc.code != 404: raise
-          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpha5-publish-verified-assets
           path: release-assets/*
           if-no-files-found: error
 
-  publish-pypi:
-    needs: verify-release
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: alpha5-publish-verified-assets
-          path: release-assets
-      - name: Stage exact Python artifacts
-        run: |
-          mkdir dist
-          cp release-assets/codex_rescue-0.1.0a5-py3-none-any.whl dist/
-          cp release-assets/codex_rescue-0.1.0a5.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
-        with:
-          packages-dir: dist/
-
   publish-npm-platforms:
-    needs: publish-pypi
+    needs: verify-release
     runs-on: ubuntu-latest
     environment:
       name: npm
@@ -188,15 +154,26 @@ jobs:
           set -euo pipefail
           npm whoami
           node scripts/check_npm_names.mjs
-      - name: Publish platform packages in deterministic order
+      - name: Publish and verify platform packages in deterministic order
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          identity="$(npm whoami)"
+          verify_public_package() {
+            local package="$1"
+            test "$(npm view "${package}@0.1.0-alpha.5" version)" = "0.1.0-alpha.5"
+            npm view "$package" maintainers --json | NPM_ID="$identity" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);const who=process.env.NPM_ID;const names=(Array.isArray(m)?m:[m]).map(x=>typeof x==="string"?x:x&&x.name);if(!names.includes(who))process.exit(1)})'
+            npm view "${package}@0.1.0-alpha.5" dist --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);if(!d.integrity||!d.shasum)process.exit(1)})'
+          }
           npm publish release-assets/codex-rescue-linux-x64-0.1.0-alpha.5.tgz --access public --provenance
+          verify_public_package codex-rescue-linux-x64
           npm publish release-assets/codex-rescue-win32-x64-0.1.0-alpha.5.tgz --access public --provenance
+          verify_public_package codex-rescue-win32-x64
           npm publish release-assets/codex-rescue-darwin-arm64-0.1.0-alpha.5.tgz --access public --provenance
+          verify_public_package codex-rescue-darwin-arm64
           npm publish release-assets/codex-rescue-darwin-x64-0.1.0-alpha.5.tgz --access public --provenance
+          verify_public_package codex-rescue-darwin-x64
 
   publish-npm-meta:
     needs: publish-npm-platforms
@@ -230,7 +207,12 @@ jobs:
             echo "STOP: codex-rescue@0.1.0-alpha.5 already exists" >&2
             exit 1
           fi
-      - name: Publish meta package last
+      - name: Publish meta package last and verify
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish release-assets/codex-rescue-0.1.0-alpha.5.tgz --access public --provenance
+        run: |
+          set -euo pipefail
+          npm publish release-assets/codex-rescue-0.1.0-alpha.5.tgz --access public --provenance
+          test "$(npm view codex-rescue@0.1.0-alpha.5 version)" = "0.1.0-alpha.5"
+          npm view codex-rescue@0.1.0-alpha.5 dist --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);if(!d.integrity||!d.shasum)process.exit(1)})'
+          npm view codex-rescue@0.1.0-alpha.5 optionalDependencies --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);const expected={"codex-rescue-linux-x64":"0.1.0-alpha.5","codex-rescue-win32-x64":"0.1.0-alpha.5","codex-rescue-darwin-arm64":"0.1.0-alpha.5","codex-rescue-darwin-x64":"0.1.0-alpha.5"};if(JSON.stringify(Object.keys(d).sort())!==JSON.stringify(Object.keys(expected).sort())||Object.values(d).some(v=>v!=="0.1.0-alpha.5"))process.exit(1)})'
