@@ -11,9 +11,10 @@ const top = JSON.parse(fs.readFileSync(path.join(root, 'npm', 'codex-rescue', 'p
 
 const platformDirs = ['linux-x64', 'win32-x64', 'darwin-arm64', 'darwin-x64'];
 
-test('launcher has no runtime downloader or shell execution path', () => {
+test('launcher has no runtime downloader, Python bootstrap, or shell execution path', () => {
   assert.doesNotMatch(launcher, /https?:\/\//i);
   assert.doesNotMatch(launcher, /curl|wget|powershell|invoke-webrequest/i);
+  assert.doesNotMatch(launcher, /\bpython(?:3)?\b|\bpip(?:x)?\b/i);
   assert.doesNotMatch(launcher, /execSync|execFileSync|\bexec\s*\(/);
   assert.doesNotMatch(launcher, /shell\s*:\s*true/);
   assert.match(launcher, /spawn\(executable, process\.argv\.slice\(2\)/);
