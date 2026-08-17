@@ -74,9 +74,13 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
     def test_release_candidate_is_manual_and_requires_exact_artifact_set(self) -> None:
         text = (ROOT / ".github/workflows/alpha5-release-candidate.yml").read_text(encoding="utf-8")
         trigger = text.split("permissions:", 1)[0]
+        default_permissions = text.split("permissions:", 1)[1].split("env:", 1)[0]
         self.assertIn("workflow_dispatch:", trigger)
         self.assertNotIn("\n  push:", trigger)
         self.assertNotIn("\n  pull_request:", trigger)
+        self.assertIn("contents: read", default_permissions)
+        self.assertIn("actions: read", default_permissions)
+        self.assertNotIn("id-token: write", default_permissions)
         self.assertIn(f"EXPECTED_TAG: {TAG}", text)
         self.assertIn("PYINSTALLER_VERSION: 6.22.1", text)
         self.assertIn("BUILD_VERSION: 1.5.0", text)
