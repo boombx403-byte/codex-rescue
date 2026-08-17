@@ -28,11 +28,11 @@ jobs:
   verify-source:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
@@ -79,17 +79,17 @@ jobs:
     needs: verify-source
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
       - name: Install pinned packaging toolchain
         run: python -m pip install "setuptools==${{ env.SETUPTOOLS_VERSION }}" "build==${{ env.BUILD_VERSION }}" "twine==${{ env.TWINE_VERSION }}"
       - run: python -m build --no-isolation
       - run: python -m twine check dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpha5-python-dist
           path: dist/*
@@ -124,13 +124,13 @@ jobs:
             binary: codex-rescue
             candidate_binary: codex-rescue-darwin-x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
       - run: python -m pip install . "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
@@ -172,7 +172,7 @@ jobs:
           mkdir -p candidate
           cp "dist/${{ matrix.binary }}" "candidate/${{ matrix.candidate_binary }}"
           cp "build/tarballs/${{ matrix.platform_package }}-0.1.0-alpha.5.tgz" candidate/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpha5-candidate-${{ matrix.platform_id }}
           path: candidate/*
@@ -182,17 +182,17 @@ jobs:
     needs: verify-source
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
       - run: mkdir -p build/tarballs
       - working-directory: npm/codex-rescue
         run: npm pack --pack-destination ../../build/tarballs
       - run: python scripts/audit_npm_tarball.py build/tarballs/codex-rescue-0.1.0-alpha.5.tgz --kind top
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpha5-npm-meta
           path: build/tarballs/codex-rescue-0.1.0-alpha.5.tgz
@@ -202,7 +202,7 @@ jobs:
     needs: [python-dist, native-npm, npm-meta]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: alpha5-*
           path: incoming
@@ -252,7 +252,7 @@ jobs:
           }
           (Path('release-bundle') / 'release-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alpha5-release-bundle
           path: release-bundle/*
