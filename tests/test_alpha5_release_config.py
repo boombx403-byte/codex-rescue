@@ -71,6 +71,8 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertNotIn("pypa/gh-action-pypi-publish", text)
         self.assertIn("Publish and verify platform packages in deterministic order", text)
         self.assertIn("verify_public_package codex-rescue-linux-x64", text)
+        self.assertIn("npm publish ./release-assets/codex-rescue-linux-x64-0.1.0-alpha.5.tgz", text)
+        self.assertNotIn("npm publish release-assets/", text)
         self.assertIn("publish-npm-meta:", text)
         self.assertIn("needs: publish-npm-platforms", text)
 
