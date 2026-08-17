@@ -179,8 +179,8 @@ class SyntheticRolloutGenerator:
         return {
             "type": "response_item",
             "payload": {
-                "type": "web_search_call",
-                "id": call_id,
+                "type": "tool_search_call",
+                "call_id": call_id,
                 "query": query,
             },
         }
@@ -188,195 +188,365 @@ class SyntheticRolloutGenerator:
     @staticmethod
     def make_search_output(
         call_id: str = "srch_001",
-        output: str = "found matches",
+        results: str = "matches found",
     ) -> dict[str, Any]:
         return {
             "type": "response_item",
             "payload": {
-                "type": "web_search_call_output",
-                "id": call_id,
-                "output": output,
+                "type": "tool_search_output",
+                "call_id": call_id,
+                "output": results,
             },
         }
 
     @staticmethod
-    def make_reasoning(content: str = "Need inspect state.") -> dict[str, Any]:
-        return {"type": "response_item", "payload": {"type": "reasoning", "summary": [{"type": "summary_text", "text": content}]}}
+    def make_compacted(
+        summary: str = "Compacted conversation history.",
+        replacement_history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if replacement_history is None:
+            replacement_history = [
+                {"type": "user_message", "message": "Initial task"},
+                {"type": "agent_message", "message": "Done with first step"},
+            ]
+        return {
+            "type": "compacted",
+            "payload": {
+                "summary": summary,
+                "replacement_history": replacement_history,
+            },
+        }
 
-    @staticmethod
-    def make_compaction(content: str = "summary") -> dict[str, Any]:
-        return {"type": "compacted", "payload": {"message": content}}
-
-    @staticmethod
-    def make_turn_context(cwd: str = "C:/test/repo") -> dict[str, Any]:
-        return {"type": "turn_context", "payload": {"cwd": cwd, "approval_policy": "never", "sandbox_policy": {"type": "read-only"}}}
-
-    @staticmethod
-    def make_event(event_type: str, **payload: Any) -> dict[str, Any]:
-        return {"type": "event_msg", "payload": {"type": event_type, **payload}}
-
-    @staticmethod
-    def make_response_item(item_type: str, **payload: Any) -> dict[str, Any]:
-        return {"type": "response_item", "payload": {"type": item_type, **payload}}
-
-    @staticmethod
-    def make_malformed_json() -> str:
-        return '{"type":"event_msg","payload":'
-
-    @staticmethod
-    def write_jsonl(path: Path, records: list[dict[str, Any] | str], newline: str = "\n") -> Path:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8", newline="") as handle:
-            for record in records:
-                if isinstance(record, str):
-                    handle.write(record)
-                else:
-                    handle.write(json.dumps(record, separators=(",", ":")))
-                handle.write(newline)
-        return path
+    @classmethod
+    def create_rollout(
+        cls,
+        records: list[dict[str, Any]],
+        line_ending: bytes = b"\n",
+        prepend_bom: bool = False,
+        raw_suffix: bytes = b"",
+    ) -> bytes:
+        """Serialize record list to JSONL byte stream with optional BOM and suffix."""
+        buf = bytearray()
+        if prepend_bom:
+            buf.extend(b"\xef\xbb\xbf")
+        for rec in records:
+            buf.extend(json.dumps(rec, separators=(",", ":")).encode("utf-8"))
+            buf.extend(line_ending)
+        if raw_suffix:
+            buf.extend(raw_suffix)
+        return bytes(buf)
 
 
 class TempSessionWorkspace:
-    """Temporary Codex home/session fixture."""
+    """Context manager providing an isolated Codex home directory."""
 
-    def __init__(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        self.sessions = self.root / "sessions"
-        self.sessions.mkdir(parents=True, exist_ok=True)
-
-    def cleanup(self) -> None:
-        self._tmp.cleanup()
+    def __init__(self, prefix: str = "codex_e2e_ws_") -> None:
+        self.temp_dir = tempfile.mkdtemp(prefix=prefix)
+        self.root = Path(self.temp_dir).resolve()
+        self.sessions_dir = self.root / "sessions"
+        self.archived_dir = self.root / "archived_sessions"
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.archived_dir.mkdir(parents=True, exist_ok=True)
 
     def __enter__(self) -> "TempSessionWorkspace":
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.cleanup()
+
+    def cleanup(self) -> None:
+        _safe_rmtree(self.root)
 
     def create_session(
         self,
         session_id: str,
-        records: list[dict[str, Any] | str] | None = None,
-        *,
-        filename: str | None = None,
-        newline: str = "\n",
+        records: list[dict[str, Any]] | None = None,
+        content_bytes: bytes | None = None,
+        date_path: str = "2026/08/14",
+        archived: bool = False,
+        mtime: float | None = None,
     ) -> Path:
-        if filename is None:
-            filename = f"rollout-{session_id}.jsonl"
-        path = self.sessions / filename
-        if records is None:
-            records = [SyntheticRolloutGenerator.make_session_meta(session_id=session_id)]
-        return SyntheticRolloutGenerator.write_jsonl(path, records, newline=newline)
+        """Create a rollout JSONL file under the appropriate directory hierarchy."""
+        base = self.archived_dir if archived else self.sessions_dir
+        target_dir = base / date_path
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = target_dir / f"rollout-{session_id}.jsonl"
+
+        if content_bytes is not None:
+            file_path.write_bytes(content_bytes)
+        elif records is not None:
+            file_path.write_bytes(SyntheticRolloutGenerator.create_rollout(records))
+        else:
+            default_records = [
+                SyntheticRolloutGenerator.make_session_meta(session_id=session_id),
+                SyntheticRolloutGenerator.make_user_msg(f"Test prompt for {session_id}"),
+                SyntheticRolloutGenerator.make_agent_msg("Ready"),
+            ]
+            file_path.write_bytes(SyntheticRolloutGenerator.create_rollout(default_records))
+
+        if mtime is not None:
+            os.utime(file_path, (mtime, mtime))
+
+        return file_path
+
+    def create_raw_file(self, rel_path: str, content_bytes: bytes) -> Path:
+        target = self.root / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content_bytes)
+        return target
 
 
 class MockGitRepo:
-    """Minimal real Git repository used by E2E verification/salvage tests."""
+    """Context manager providing an isolated deterministic Git repository."""
 
-    def __init__(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        subprocess.run(["git", "init"], cwd=self.root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["git", "config", "user.email", "codex-rescue@example.invalid"], cwd=self.root, check=True)
-        subprocess.run(["git", "config", "user.name", "Codex Rescue E2E"], cwd=self.root, check=True)
-        (self.root / "README.md").write_text("fixture\n", encoding="utf-8")
-        subprocess.run(["git", "add", "README.md"], cwd=self.root, check=True)
-        subprocess.run(["git", "commit", "-m", "fixture"], cwd=self.root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    def cleanup(self) -> None:
-        _safe_rmtree(self.root)
-        self._tmp.cleanup()
+    def __init__(self, prefix: str = "codex_e2e_git_") -> None:
+        self.temp_dir = tempfile.mkdtemp(prefix=prefix)
+        self.root = Path(self.temp_dir).resolve()
+        self._init_git()
 
     def __enter__(self) -> "MockGitRepo":
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.cleanup()
 
-    def run_git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=check)
+    def cleanup(self) -> None:
+        _safe_rmtree(self.root)
 
-    def write(self, relative: str, content: str) -> Path:
-        path = self.root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return path
+    def _env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env["GIT_AUTHOR_NAME"] = "Codex Tester"
+        env["GIT_AUTHOR_EMAIL"] = "tester@codex-rescue.local"
+        env["GIT_COMMITTER_NAME"] = "Codex Tester"
+        env["GIT_COMMITTER_EMAIL"] = "tester@codex-rescue.local"
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
+        env["GIT_CONFIG_SYSTEM"] = os.devnull
+        return env
 
-    def commit_all(self, message: str) -> str:
-        self.run_git("add", "-A")
-        self.run_git("commit", "-m", message)
-        return self.run_git("rev-parse", "HEAD").stdout.strip()
+    def _git(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+            check=True,
+            env=self._env(),
+        )
+
+    def _init_git(self) -> None:
+        self._git(["init"])
+        self._git(["config", "user.name", "Codex Tester"])
+        self._git(["config", "user.email", "tester@codex-rescue.local"])
+        readme = self.root / "README.md"
+        readme.write_text("# Test Repo\n", encoding="utf-8")
+        self._git(["add", "README.md"])
+        self._git(["commit", "-m", "Initial commit"])
+
+    def commit_file(self, rel_path: str, content: str, msg: str = "Commit update") -> str:
+        fpath = self.root / rel_path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding="utf-8")
+        self._git(["add", rel_path])
+        self._git(["commit", "-m", msg])
+        res = self._git(["rev-parse", "HEAD"])
+        return res.stdout.strip()
+
+    def modify_file(self, rel_path: str, content: str) -> None:
+        fpath = self.root / rel_path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding="utf-8")
+
+    def stage_file(self, rel_path: str) -> None:
+        self._git(["add", rel_path])
+
+    def untracked_file(self, rel_path: str, content: str) -> Path:
+        fpath = self.root / rel_path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding="utf-8")
+        return fpath
+
+    def delete_file(self, rel_path: str) -> None:
+        fpath = self.root / rel_path
+        if fpath.exists():
+            fpath.unlink()
+
+    def set_assume_unchanged(self, rel_path: str) -> None:
+        self._git(["update-index", "--assume-unchanged", rel_path])
+
+    def set_skip_worktree(self, rel_path: str) -> None:
+        self._git(["update-index", "--skip-worktree", rel_path])
+
+    def detach_head(self) -> str:
+        head_sha = self.get_head_sha()
+        self._git(["checkout", "--detach", head_sha])
+        return head_sha
+
+    def get_head_sha(self) -> str:
+        res = self._git(["rev-parse", "HEAD"])
+        return res.stdout.strip()
 
 
 class Win32LockContext:
-    """Hold a Windows file handle/lock for sharing-violation tests."""
+    """Context manager acquiring Win32 CreateFileW handles and LockFileEx locks."""
 
-    def __init__(self, path: Path, *, deny_write: bool = True, byte_lock: bool = False) -> None:
-        self.path = Path(path)
-        self.deny_write = deny_write
-        self.byte_lock = byte_lock
-        self.handle: int | None = None
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    FILE_SHARE_READ = 0x00000001
+    FILE_SHARE_WRITE = 0x00000002
+    FILE_SHARE_DELETE = 0x00000004
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x80
+    LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
+    LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+
+    def __init__(
+        self,
+        path: Path | str,
+        desired_access: int = GENERIC_READ,
+        share_mode: int = FILE_SHARE_READ | FILE_SHARE_WRITE,
+    ) -> None:
+        self.path = str(Path(path).resolve())
+        self.desired_access = desired_access
+        self.share_mode = share_mode
+        self.handle = None
 
     def __enter__(self) -> "Win32LockContext":
-        if os.name != "nt":
+        if sys.platform != "win32":
             return self
-        GENERIC_READ = 0x80000000
-        FILE_SHARE_READ = 0x00000001
-        FILE_SHARE_WRITE = 0x00000002
-        OPEN_EXISTING = 3
-        share = FILE_SHARE_READ if self.deny_write else (FILE_SHARE_READ | FILE_SHARE_WRITE)
-        CreateFileW = ctypes.windll.kernel32.CreateFileW
-        CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        CreateFileW.restype = wintypes.HANDLE
-        handle = CreateFileW(str(self.path), GENERIC_READ, share, None, OPEN_EXISTING, 0, None)
-        if handle == wintypes.HANDLE(-1).value:
-            raise OSError(ctypes.get_last_error(), "CreateFileW failed")
-        self.handle = int(handle)
-        if self.byte_lock:
-            overlapped = wintypes.OVERLAPPED()
-            ok = ctypes.windll.kernel32.LockFileEx(self.handle, 0x00000002, 0, 1, 0, ctypes.byref(overlapped))
-            if not ok:
-                raise OSError(ctypes.get_last_error(), "LockFileEx failed")
+
+        kernel32 = ctypes.windll.kernel32
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        self.handle = kernel32.CreateFileW(
+            self.path,
+            self.desired_access,
+            self.share_mode,
+            None,
+            self.OPEN_EXISTING,
+            self.FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+        if self.handle == INVALID_HANDLE_VALUE:
+            err = kernel32.GetLastError()
+            raise ctypes.WinError(err)
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        if os.name == "nt" and self.handle is not None:
+    def lock_range(self, offset: int, length: int, exclusive: bool = True) -> None:
+        if sys.platform != "win32" or not self.handle:
+            return
+
+        kernel32 = ctypes.windll.kernel32
+        flags = self.LOCKFILE_FAIL_IMMEDIATELY | (self.LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0)
+
+        class OVERLAPPED(ctypes.Structure):
+            _fields_ = [
+                ("Internal", wintypes.LPVOID),
+                ("InternalHigh", wintypes.LPVOID),
+                ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD),
+                ("hEvent", wintypes.HANDLE),
+            ]
+
+        ov = OVERLAPPED()
+        ov.Offset = offset & 0xFFFFFFFF
+        ov.OffsetHigh = (offset >> 32) & 0xFFFFFFFF
+
+        success = kernel32.LockFileEx(
+            self.handle,
+            flags,
+            0,
+            length & 0xFFFFFFFF,
+            (length >> 32) & 0xFFFFFFFF,
+            ctypes.byref(ov),
+        )
+        if not success:
+            err = kernel32.GetLastError()
+            raise ctypes.WinError(err)
+
+    def unlock_range(self, offset: int, length: int) -> None:
+        if sys.platform != "win32" or not self.handle:
+            return
+
+        kernel32 = ctypes.windll.kernel32
+
+        class OVERLAPPED(ctypes.Structure):
+            _fields_ = [
+                ("Internal", wintypes.LPVOID),
+                ("InternalHigh", wintypes.LPVOID),
+                ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD),
+                ("hEvent", wintypes.HANDLE),
+            ]
+
+        ov = OVERLAPPED()
+        ov.Offset = offset & 0xFFFFFFFF
+        ov.OffsetHigh = (offset >> 32) & 0xFFFFFFFF
+
+        success = kernel32.UnlockFileEx(
+            self.handle,
+            0,
+            length & 0xFFFFFFFF,
+            (length >> 32) & 0xFFFFFFFF,
+            ctypes.byref(ov),
+        )
+        if not success:
+            err = kernel32.GetLastError()
+            raise ctypes.WinError(err)
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if sys.platform == "win32" and self.handle:
             ctypes.windll.kernel32.CloseHandle(self.handle)
             self.handle = None
 
 
 class AsyncRolloutWriter:
-    """Append records asynchronously to emulate an actively-written rollout."""
+    """Asynchronous background worker appending or streaming data to a file."""
 
-    def __init__(self, path: Path, records: list[dict[str, Any]], delay: float = 0.01) -> None:
-        self.path = Path(path)
-        self.records = records
-        self.delay = delay
-        self.thread: threading.Thread | None = None
+    def __init__(self, target_path: Path | str) -> None:
+        self.target_path = Path(target_path)
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    def start(self) -> None:
-        def _write() -> None:
-            with self.path.open("a", encoding="utf-8") as handle:
-                for record in self.records:
-                    time.sleep(self.delay)
-                    handle.write(json.dumps(record, separators=(",", ":")) + "\n")
-                    handle.flush()
-                    try:
-                        os.fsync(handle.fileno())
-                    except OSError:
-                        pass
+    def start_streaming(
+        self,
+        chunks: list[bytes],
+        interval_sec: float = 0.05,
+    ) -> None:
+        def _worker() -> None:
+            with open(self.target_path, "ab", buffering=0) as f:
+                for chunk in chunks:
+                    if self._stop_event.is_set():
+                        break
+                    f.write(chunk)
+                    f.flush()
+                    time.sleep(interval_sec)
 
-        self.thread = threading.Thread(target=_write, daemon=True)
-        self.thread.start()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=_worker, daemon=True)
+        self._thread.start()
 
-    def join(self, timeout: float = 5.0) -> None:
-        if self.thread is not None:
-            self.thread.join(timeout)
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
 
 
-def run_cli(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    merged_env = os.environ.copy()
+def run_cli_command(
+    args: list[str],
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+) -> tuple[int, str, str]:
+    """Execute codex-rescue CLI subcommand via python -m codex_rescue.cli."""
+    cmd_env = dict(os.environ)
+    cmd_env["PYTHONPATH"] = str(_SRC_DIR)
     if env:
-        merged_env.update(env)
-    merged_env.setdefault("PYTHONPATH", str(_SRC_DIR))
-    return subprocess.run([sys.executable, "-m", "codex_rescue.cli", *args], cwd=cwd, env=merged_env, text=True, capture_output=True)
+        cmd_env.update(env)
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "codex_rescue.cli", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=cmd_env,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
