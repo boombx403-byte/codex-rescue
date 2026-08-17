@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,8 @@ SEVERITY = [
     "ORDINAL_ANALYSIS_INCOMPLETE",
     "UNFINISHED_TOOL_CALL",
     "COMPACTION_STATE_LOSS",
+    "WEDGED_PROJECTION",
+    "PROJECTION_ANALYSIS_INCOMPLETE",
     "REPO_STATE_DIVERGED",
     "HEALTHY",
 ]
@@ -31,6 +33,7 @@ class DoctorResult:
     findings: list[str]
     transcript: ParseResult
     repository: dict[str, Any]
+    projection: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,10 +42,11 @@ class DoctorResult:
             "findings": self.findings,
             "transcript": self.transcript.to_dict(),
             "repository": self.repository,
+            "projection": self.projection,
         }
 
 
-def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> DoctorResult:
+def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000, codex_home: str | Path | None = None) -> DoctorResult:
     parsed = parse_transcript(path, oversized_threshold=oversized_threshold)
     findings: set[str] = set()
     if parsed.corruption_class:
@@ -62,6 +66,14 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     if parsed.compaction_state_loss:
         findings.add("COMPACTION_STATE_LOSS")
 
+    from .projection import inspect_projection_parity
+
+    projection = inspect_projection_parity(path, codex_home=codex_home)
+    if projection.get("status") == "WEDGED":
+        findings.add("WEDGED_PROJECTION")
+    elif projection.get("status") == "UNKNOWN":
+        findings.add("PROJECTION_ANALYSIS_INCOMPLETE")
+
     cwd = parsed.session_metadata.get("cwd")
     repository: dict[str, Any]
     if cwd:
@@ -78,4 +90,4 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     if not findings:
         findings.add("HEALTHY")
     status = next(label for label in SEVERITY if label in findings)
-    return DoctorResult(str(Path(path).resolve()), status, sorted(findings, key=SEVERITY.index), parsed, repository)
+    return DoctorResult(str(Path(path).resolve()), status, sorted(findings, key=SEVERITY.index), parsed, repository, projection)

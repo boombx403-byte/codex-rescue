@@ -21,10 +21,10 @@ def _json(data: object) -> None:
     print(json.dumps({"schema_version": 1, "data": data}, indent=2, ensure_ascii=False, sort_keys=True))
 
 
-def _doctor(path: Path, oversized_threshold: int = 1_000_000):
+def _doctor(path: Path, oversized_threshold: int = 1_000_000, codex_home: Path | None = None):
     from .doctor import doctor_session
 
-    result = doctor_session(path, oversized_threshold=oversized_threshold)
+    result = doctor_session(path, oversized_threshold=oversized_threshold, codex_home=codex_home)
     return result
 
 
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             args.session = resolve_latest(args.codex_home)
         if args.session is None:
             parser.error("doctor requires SESSION or --latest (no session discovered)")
-        result = _doctor(args.session, args.oversized_threshold)
+        result = _doctor(args.session, args.oversized_threshold, codex_home=args.codex_home)
         if args.json:
             _json(_to_dict(result))
         else:
@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             args.session = resolve_latest(args.codex_home)
         if args.session is None:
             parser.error("salvage requires SESSION or --latest (no session discovered)")
-        result = _doctor(args.session, args.oversized_threshold)
+        result = _doctor(args.session, args.oversized_threshold, codex_home=args.codex_home)
         data = _to_dict(result)
         status = str(data.get("status", "UNKNOWN_CORRUPTION"))
         findings = list(data.get("findings") or [status])
