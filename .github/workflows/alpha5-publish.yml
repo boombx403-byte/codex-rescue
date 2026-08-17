@@ -166,13 +166,13 @@ jobs:
             npm view "$package" maintainers --json | NPM_ID="$identity" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);const who=process.env.NPM_ID;const names=(Array.isArray(m)?m:[m]).map(x=>typeof x==="string"?x:x&&x.name);if(!names.includes(who))process.exit(1)})'
             npm view "${package}@0.1.0-alpha.5" dist --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);if(!d.integrity||!d.shasum)process.exit(1)})'
           }
-          npm publish release-assets/codex-rescue-linux-x64-0.1.0-alpha.5.tgz --access public --provenance
+          npm publish ./release-assets/codex-rescue-linux-x64-0.1.0-alpha.5.tgz --access public --provenance
           verify_public_package codex-rescue-linux-x64
-          npm publish release-assets/codex-rescue-win32-x64-0.1.0-alpha.5.tgz --access public --provenance
+          npm publish ./release-assets/codex-rescue-win32-x64-0.1.0-alpha.5.tgz --access public --provenance
           verify_public_package codex-rescue-win32-x64
-          npm publish release-assets/codex-rescue-darwin-arm64-0.1.0-alpha.5.tgz --access public --provenance
+          npm publish ./release-assets/codex-rescue-darwin-arm64-0.1.0-alpha.5.tgz --access public --provenance
           verify_public_package codex-rescue-darwin-arm64
-          npm publish release-assets/codex-rescue-darwin-x64-0.1.0-alpha.5.tgz --access public --provenance
+          npm publish ./release-assets/codex-rescue-darwin-x64-0.1.0-alpha.5.tgz --access public --provenance
           verify_public_package codex-rescue-darwin-x64
 
   publish-npm-meta:
@@ -212,7 +212,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          npm publish release-assets/codex-rescue-0.1.0-alpha.5.tgz --access public --provenance
+          npm publish ./release-assets/codex-rescue-0.1.0-alpha.5.tgz --access public --provenance
           test "$(npm view codex-rescue@0.1.0-alpha.5 version)" = "0.1.0-alpha.5"
           npm view codex-rescue@0.1.0-alpha.5 dist --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);if(!d.integrity||!d.shasum)process.exit(1)})'
           npm view codex-rescue@0.1.0-alpha.5 optionalDependencies --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);const expected={"codex-rescue-linux-x64":"0.1.0-alpha.5","codex-rescue-win32-x64":"0.1.0-alpha.5","codex-rescue-darwin-arm64":"0.1.0-alpha.5","codex-rescue-darwin-x64":"0.1.0-alpha.5"};if(JSON.stringify(Object.keys(d).sort())!==JSON.stringify(Object.keys(expected).sort())||Object.values(d).some(v=>v!=="0.1.0-alpha.5"))process.exit(1)})'
