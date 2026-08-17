@@ -308,9 +308,9 @@ def discover_sessions(
         if identity:
             by_path[identity] = missing
 
-    # Stable ordering: freshest first, then logical id/path.  Apply --limit
-    # after filesystem + DB correlation so an indexed-only mismatch cannot
-    # silently displace a more recent rollout before reconciliation.
+    # Stable ordering: freshest first, then logical id/path.  Correlate and
+    # deduplicate before applying --limit so duplicate candidates cannot consume
+    # slots that should hold distinct logical sessions.
     candidates.sort(
         key=lambda item: (
             item.mtime,
@@ -319,8 +319,9 @@ def discover_sessions(
         ),
         reverse=True,
     )
-    if limit is not None:
-        candidates = candidates[: max(0, int(limit))]
+    max_results = None if limit is None else max(0, int(limit))
+    if max_results == 0:
+        return []
 
     results: list[Alpha5SessionSummary] = []
     seen_ids: set[str] = set()
@@ -372,12 +373,16 @@ def discover_sessions(
                         inventory_db=candidate.inventory.db_path if candidate.inventory else None,
                     )
                 )
+                if max_results is not None and len(results) >= max_results:
+                    break
                 continue
             indexed = True if candidate.inventory else (False if inventory_available else None)
             mismatch = "rollout_not_indexed" if inventory_available and candidate.inventory is None else None
             results.append(
                 _wrap(summary, indexed=indexed, mismatch=mismatch, inventory=candidate.inventory)
             )
+            if max_results is not None and len(results) >= max_results:
+                break
             continue
 
         if candidate.inventory is None:
@@ -402,6 +407,8 @@ def discover_sessions(
                 inventory_db=candidate.inventory.db_path,
             )
         )
+        if max_results is not None and len(results) >= max_results:
+            break
     return results
 
 
