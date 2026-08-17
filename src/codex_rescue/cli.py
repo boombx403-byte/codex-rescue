@@ -12,8 +12,8 @@ from .verify import verify_rescue
 
 HEALTHY_EXPLANATION = (
     "HEALTHY means Codex Rescue found no recognized structural/persistence issue in the analyzed rollout. "
-    "It does not validate Codex Desktop sidebar/index/Remote metadata, prove semantic completeness, "
-    "or rule out every upstream Codex failure mode."
+    "Projection parity is reported separately and may be not-applicable when no compatible read-only state is available. "
+    "HEALTHY does not prove semantic completeness or rule out every upstream Codex failure mode."
 )
 
 
@@ -24,8 +24,7 @@ def _json(data: object) -> None:
 def _doctor(path: Path, oversized_threshold: int = 1_000_000):
     from .doctor import doctor_session
 
-    result = doctor_session(path, oversized_threshold=oversized_threshold)
-    return result
+    return doctor_session(path, oversized_threshold=oversized_threshold)
 
 
 def _to_dict(value: object) -> dict[str, object]:
@@ -58,6 +57,9 @@ def _print_doctor(result: object) -> None:
     findings = list(data.get("findings") or [])
     if findings:
         print(f"Findings: {', '.join(str(item) for item in findings)}")
+    projection = data.get("projection")
+    if isinstance(projection, dict):
+        print(f"Projection: {projection.get('status', 'unknown')} — {projection.get('reason', 'unavailable')}")
     if status == "HEALTHY":
         print(f"Note: {HEALTHY_EXPLANATION}")
     repository = data.get("repository")
@@ -101,8 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=20,
         help=(
-            "bounded listing window of the most recently modified rollouts (default: 20); "
-            "increase when checking an older known session; omission does not prove a rollout is undiscoverable"
+            "bounded listing window after rollout + read-only SQLite inventory correlation (default: 20); "
+            "increase when checking an older known session"
         ),
     )
     sessions.add_argument("--latest", action="store_true")
@@ -131,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command in (None, "sessions"):
-        from .discovery import discover_sessions
+        from .discovery_alpha5 import discover_sessions
 
         limit = 1 if getattr(args, "latest", False) else getattr(args, "limit", 20)
         summaries = discover_sessions(getattr(args, "codex_home", None), limit=limit)
@@ -144,12 +146,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{index}. {item.modified_at}  {item.status}")
                 print(f"   repo: {item.repo or item.cwd or 'unknown'}")
                 print(f"   prompt: {item.prompt_preview or 'unavailable'}")
+                if item.inventory_mismatch:
+                    print(f"   inventory: {item.inventory_mismatch}")
                 if item.reason:
                     print(f"   reason: {item.reason}")
         return 0
     if args.command == "doctor":
         if args.latest:
-            from .discovery import resolve_latest
+            from .discovery_alpha5 import resolve_latest
             args.session = resolve_latest(args.codex_home)
         if args.session is None:
             parser.error("doctor requires SESSION or --latest (no session discovered)")
@@ -161,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "salvage":
         if args.latest:
-            from .discovery import resolve_latest
+            from .discovery_alpha5 import resolve_latest
             args.session = resolve_latest(args.codex_home)
         if args.session is None:
             parser.error("salvage requires SESSION or --latest (no session discovered)")
