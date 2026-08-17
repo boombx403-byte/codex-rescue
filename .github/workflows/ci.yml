@@ -2,18 +2,26 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/alpha5-complete]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  core:
+    name: core (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-15]
+        python-version: ["3.11", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -22,15 +30,25 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install package
-        run: pip install .
+        run: python -m pip install .
+
+      - name: Compile Python sources
+        run: python -m compileall -q src
 
       - name: CLI smoke test
         run: |
           codex-rescue --version
           codex-rescue --help
 
-      - name: Run unit tests
+      - name: NPM launcher security tests
+        run: node --test npm/tests/*.test.cjs
+
+      - name: Run unit and regression tests
         run: python -m unittest discover -s tests -v
         env:
           PYTHONPATH: src
@@ -40,7 +58,62 @@ jobs:
         env:
           PYTHONPATH: src
 
-      - name: Run alpha demo
+  qualification:
+    name: Alpha5 qualification
+    runs-on: ubuntu-latest
+    needs: core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install qualification tooling
+        run: python -m pip install . "setuptools==84.0.0" "build==1.5.0" "twine==7.0.0"
+
+      - name: Targeted Alpha5 tests
+        run: |
+          python -m unittest -v tests.test_alpha5_projection
+          python -m unittest -v tests.test_alpha5_diagnostics
+          python -m unittest -v tests.test_alpha5_discovery
+        env:
+          PYTHONPATH: src
+
+      - name: Full tests
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+
+      - name: Full E2E harness
+        run: python tests/e2e/harness_e2e.py --tier all --json-report .ci-e2e.json
+        env:
+          PYTHONPATH: src
+
+      - name: Compileall
+        run: python -m compileall -q src tests scripts
+
+      - name: Alpha demo
         run: python scripts/demo_alpha.py
         env:
           PYTHONPATH: src
+
+      - name: Build Python distributions
+        run: python -m build --no-isolation
+
+      - name: Validate Python distributions
+        run: python -m twine check dist/*
+
+      - name: Upload qualification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha5-python-qualification
+          path: |
+            dist/*
+            .ci-e2e.json
+          if-no-files-found: error

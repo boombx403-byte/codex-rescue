@@ -1,0 +1,9 @@
+{
+  "name": "codex-rescue-win32-x64",
+  "version": "0.1.0-alpha.5",
+  "description": "Windows x64 standalone binary for codex-rescue",
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/codex-rescue.exe", "README.md"]
+}
