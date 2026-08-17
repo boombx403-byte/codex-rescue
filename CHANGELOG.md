@@ -19,17 +19,21 @@ All notable changes to Codex Rescue are documented here.
 - Bounded large-rollout aggregates for physical record size, bounded overflows, inline-media indicators, and compaction counts without base64 decoding.
 - Alpha5 synthetic regression suites for projection, discovery, schema compatibility, typed IDs, tool correlation, writer/lifecycle semantics, opaque formats, incomplete rollouts, and bounded large-record scanning.
 - Standalone executable build entrypoint using PyInstaller.
-- Thin npm launcher and provisional unscoped platform packages for Linux x64, Windows x64, macOS arm64, and macOS x64.
-- npm package allowlist/security tests, local tarball assembly/audit helpers, SHA256 recording, structured Python/native/npm JSON parity tooling, and fail-closed manual npm registry-name preflight.
+- Thin npm launcher and unscoped platform packages for Linux x64, Windows x64, macOS arm64, and macOS x64.
+- npm package allowlist/security tests, local tarball assembly/audit helpers, SHA256 recording, structured Python/native/npm JSON parity tooling, and fail-closed npm registry-name/PyPI preflight.
 - Cross-platform core CI plus Alpha5 Python qualification and native/npm build/smoke/parity workflows.
-- `docs/alpha5-field-validation.md` field-evidence traceability.
+- Manual-only deterministic Alpha5 release-candidate workflow that binds the exact tag and source SHA, rebuilds Python/native/npm artifacts, verifies the exact expected artifact set, and emits a SHA256 manifest.
+- Manual-only Alpha5 publish workflow that verifies the candidate run, exact GitHub prerelease asset hashes, PyPI absence, npm identity/name ownership gates, publishes Python through Trusted Publishing, publishes platform npm packages first, and publishes the npm meta package last.
+- `docs/alpha5-field-validation.md` field-evidence traceability, including upstream/mobile and WebSocket negative controls that must not become fabricated local-corruption diagnoses.
+- `docs/alpha5-release-handoff.md` operational stop conditions and deterministic release sequence.
 
 ### Changed
 
 - Python package version is `0.1.0a5`; npm mapping is `0.1.0-alpha.5`.
 - `sessions` now treats compatible SQLite/sidebar state as enrichment instead of the only inventory authority.
 - `doctor` now includes Alpha5 aggregate diagnostics, projection state, schema-compatibility aggregation, and more precise repository evidence classifications.
-- The README is rewritten around actual Alpha5 capabilities, safety boundaries, target npm/native distribution, and unverified qualification state.
+- The README is rewritten around actual Alpha5 capabilities, safety boundaries, target npm/native distribution, and prerelease status.
+- Build-only freezer and Python packaging tool versions used by Alpha5 qualification/release-candidate workflows are pinned to the versions qualified in CI to reduce release drift.
 
 ### Preserved from Alpha4
 
@@ -46,7 +50,9 @@ All notable changes to Codex Rescue are documented here.
 - Alpha5 does not invent missing tool results or infer that a tool failed to execute merely because persisted output is absent.
 - The npm launcher does not download binaries at runtime, invoke a shell, bootstrap Python, or include telemetry.
 - Ordinary pull-request CI does not publish Alpha5, create an Alpha5 tag, or merge the Alpha5 branch.
-- npm package names and native/package functionality remain **UNVERIFIED** until the corresponding CI/preflight actually runs successfully.
+- Remote/iOS hydration failures and WebSocket retry/close behavior are upstream-only evidence; Rescue does not claim to observe or repair them.
+- Large persisted history/payload evidence may increase diagnostic concern but is not encoded as a definitive cause of mobile/UI failure.
+- Registry-name availability is checked independently from authenticated publication rights; publish workflows re-check npm identity/ownership immediately before publication.
 
 ### Known limitations
 
@@ -54,8 +60,8 @@ All notable changes to Codex Rescue are documented here.
 - Discovery remains bounded to supported rollout roots and bounded immediate Codex-home DB inspection.
 - Alpha5 adds a second bounded sequential rollout scan for aggregate diagnostics; memory is bounded but I/O increases on very large files.
 - Writer/lifecycle/opaque-format conclusions are structural diagnostics only and do not claim live process state or upstream root cause.
-- Rescue still does not fix upstream Codex transport, Desktop/UI, compaction service, API, app-server locking, or process lifecycle defects.
-- Standalone binaries and npm packages are not considered supported merely because build workflow YAML exists.
+- Rescue still does not fix upstream Codex transport, Desktop/UI, remote/mobile hydration, compaction service, API, app-server locking, or process lifecycle defects.
+- Release publication remains gated on the exact final PR head, exact-source candidate build, tag/SHA integrity, registry identity/ownership, and public artifact verification.
 
 ## v0.1.0-alpha.4
 
