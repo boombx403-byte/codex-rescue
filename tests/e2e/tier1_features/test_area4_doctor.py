@@ -33,6 +33,8 @@ class TestArea4DoctorFeatures(unittest.TestCase):
             "ORDINAL_ANALYSIS_INCOMPLETE",
             "UNFINISHED_TOOL_CALL",
             "COMPACTION_STATE_LOSS",
+            "WEDGED_PROJECTION",
+            "PROJECTION_ANALYSIS_INCOMPLETE",
             "REPO_STATE_DIVERGED",
             "HEALTHY",
         ]
