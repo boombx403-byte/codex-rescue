@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/shleder/codex-rescue/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/shleder/codex-rescue/ci.yml?branch=main&style=flat-square&label=CI&logo=github" alt="CI Status"></a>
-  <img src="https://img.shields.io/badge/version-v0.1.0--alpha.3-3fb950?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-v0.1.0--alpha.4-3fb950?style=flat-square" alt="Version">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-1f6feb?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <a href="#privacy"><img src="https://img.shields.io/badge/privacy-100%25%20local--first-238636?style=flat-square" alt="Privacy"></a>
@@ -173,6 +173,9 @@ Review: handoff contains load-bearing unknowns
 - **Interactive continuation** — automatic fresh continuation depends on terminal/TTY environment (Windows ConPTY limitations noted).
 - **Previous versions** — validation is focused on Codex CLI 0.147.0; earlier versions are smoke-tested or observed.
 - **Side-effect replay** — Rescue does not automatically replay unknown side effects; it reports them as `REVIEW_REQUIRED`.
+- **Unknown operational records** - unsupported future operational events fail closed and may require review; harmless metadata on known records remains compatible.
+- **Discovery scope** - bounded discovery may miss sessions absent from upstream index state; direct path diagnosis remains useful when the path is known.
+- **External validation** - Alpha 4 remains experimental; no external run on the qualified build, salvage run, or recovery success has been confirmed.
 
 ---
 

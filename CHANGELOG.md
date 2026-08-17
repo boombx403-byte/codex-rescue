@@ -1,3 +1,27 @@
+## v0.1.0-alpha.4
+
+### Added
+
+- Detect persisted rollout-local reuse of paginated ordinals.
+
+### Fixed
+
+- Accept valid current-format `event_msg` / `mcp_tool_call_end` records without a false `UNKNOWN_OPERATIONAL_SCHEMA`.
+- Classify unavailable or non-Git repository state conservatively instead of asserting `REPO_STATE_DIVERGED` without Git evidence.
+- Keep genuinely unknown future operational records fail-closed so they cannot silently produce `HEALTHY`; harmless metadata on known records remains compatible.
+
+### Safety / Evidence Boundaries
+
+- RC validation includes full unit/E2E suites, fixture harness, package build, and clean-install smoke checks.
+- Preserve source rollouts, keep salvage forked, avoid replaying unknown side effects, and retain conservative `UNKNOWN` / `REVIEW_REQUIRED` boundaries.
+- Alpha 4 is an experimental engineering release. Historical public-alpha evidence includes two Rescue users; no qualified-build external Rescue run, confirmed external salvage run, or confirmed external recovery success is included.
+
+### Known Limitations
+
+- Discovery can miss sessions absent from upstream index state; direct path diagnosis may still be useful.
+- Rescue does not repair private SQLite or projection state, Codex Desktop behavior, compaction/media retention, or unknown side effects.
+- Unsupported future operational records may require review rather than a healthy verdict.
+
 # Changelog
 
 All notable changes to Codex Rescue will be documented in this file.

@@ -164,9 +164,8 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
     try:
         actual = inspect_git_state(cwd)
     except GitStateError as exc:
-        if source_review_reasons:
-            return VerifyResult("STATE_DIVERGED", (str(exc),), tuple(source_review_reasons))
-        return VerifyResult("STATE_DIVERGED", (str(exc),), ())
+        reasons = tuple(source_review_reasons) + (str(exc),)
+        return VerifyResult("REVIEW_REQUIRED", (), reasons)
     conflicts = compare_git_state(repository, actual)
     conflicts.extend(source_conflicts)
     if conflicts:
@@ -184,6 +183,10 @@ def verify_rescue(root: str | Path, rescue_id: str) -> VerifyResult:
         reasons.append("tool call/output correlation is ambiguous")
     if transcript.get("operational_schema_issues"):
         reasons.append("unknown operational schema requires review")
+    if transcript.get("ordinal_reuse"):
+        reasons.append("persisted paginated ordinal reuse requires external projection/state review")
+    if transcript.get("ordinal_tracking_overflow"):
+        reasons.append("bounded persisted paginated ordinal scan cannot establish absence of later reuse")
     snapshot = _mapping(handoff.get("source_snapshot"))
     if snapshot.get("stable") is False:
         reasons.append("source rollout changed during salvage snapshot")
