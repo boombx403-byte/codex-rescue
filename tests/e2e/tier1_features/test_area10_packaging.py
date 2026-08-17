@@ -28,9 +28,9 @@ class TestArea10PackagingFeatures(unittest.TestCase):
     """End-to-end feature tests for package configuration, standards compliance, and offline isolation."""
 
     def test_e2e_t1_packaging_package_init_version(self) -> None:
-        """Verify __version__ is exported and matches 0.1.0a4."""
+        """Verify __version__ is exported and matches Alpha5."""
         self.assertTrue(hasattr(codex_rescue, "__version__"))
-        self.assertEqual(codex_rescue.__version__, "0.1.0a4")
+        self.assertEqual(codex_rescue.__version__, "0.1.0a5")
 
     def test_e2e_t1_packaging_pyproject_structure(self) -> None:
         """Verify pyproject.toml defines standards-compliant setuptools configuration."""
@@ -59,7 +59,7 @@ class TestArea10PackagingFeatures(unittest.TestCase):
         stdlib_names = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else {
             "os", "sys", "json", "hashlib", "time", "pathlib", "collections", "dataclasses",
             "typing", "re", "subprocess", "tempfile", "shutil", "stat", "argparse", "ctypes",
-            "datetime", "math", "functools", "itertools", "enum", "logging", "errno",
+            "datetime", "math", "functools", "itertools", "enum", "logging", "errno", "sqlite3", "urllib",
         }
         allowed = stdlib_names | {"codex_rescue", *{p.stem for p in src_dir.glob("*.py")}}
 
@@ -85,10 +85,10 @@ class TestArea10PackagingFeatures(unittest.TestCase):
                             )
 
     def test_e2e_t1_packaging_cli_version_flag(self) -> None:
-        """Verify codex-rescue --version prints version string and exits with code 0."""
+        """Verify codex-rescue --version prints Alpha5 version string and exits with code 0."""
         code, stdout, stderr = run_cli_command(["--version"])
         self.assertEqual(code, 0)
-        self.assertIn("0.1.0a4", stdout)
+        self.assertIn("0.1.0a5", stdout)
 
 
 if __name__ == "__main__":
