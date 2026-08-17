@@ -149,6 +149,25 @@ class Alpha5DiscoveryTests(unittest.TestCase):
             self.assertEqual(len(sessions), 2)
             self.assertGreaterEqual(sessions[0].mtime, sessions[1].mtime)
 
+    def test_limit_counts_unique_sessions_after_deduplication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            duplicate_id = "019fffff-0020-7000-8000-000000000020"
+            second_id = "019fffff-0021-7000-8000-000000000021"
+            third_id = "019fffff-0022-7000-8000-000000000022"
+            active = self._rollout(root, duplicate_id, archived=False, message="active")
+            archived = self._rollout(root, duplicate_id, archived=True, message="archived")
+            second = self._rollout(root, second_id, message="second")
+            third = self._rollout(root, third_id, message="third")
+            os.utime(active, (4000, 4000))
+            os.utime(archived, (5000, 5000))
+            os.utime(second, (3000, 3000))
+            os.utime(third, (2000, 2000))
+
+            sessions = discover_sessions(root, limit=2, include_archived=True)
+            self.assertEqual(len(sessions), 2)
+            self.assertEqual({session.session_id for session in sessions}, {duplicate_id, second_id})
+
 
 if __name__ == "__main__":
     unittest.main()
