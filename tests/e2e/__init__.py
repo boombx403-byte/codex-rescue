@@ -1,4 +1,4 @@
-"""E2E Test Suite for Codex Rescue (0.1.0a4)."""
+"""E2E test suite for Codex Rescue Alpha5."""
 from __future__ import annotations
 
 import sys
