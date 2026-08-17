@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   EXPECTED_TAG: v0.1.0-alpha.5
@@ -143,6 +144,7 @@ jobs:
       name: pypi
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/download-artifact@v4
@@ -165,6 +167,7 @@ jobs:
       name: npm
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -202,6 +205,7 @@ jobs:
       name: npm
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/setup-node@v4
