@@ -1,10 +1,16 @@
 name: NPM Registry Name Preflight
 
 on:
+  push:
+    branches: [feat/alpha5-complete]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: npm-registry-preflight-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check-provisional-names:
@@ -20,5 +26,6 @@ jobs:
       - name: Record qualification boundary
         if: always()
         run: |
-          echo "This workflow does not publish packages." >> "$GITHUB_STEP_SUMMARY"
-          echo "A registered name requires independent ownership verification before release." >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow never publishes packages." >> "$GITHUB_STEP_SUMMARY"
+          echo "An E404 counts as available only when npm returned an unambiguous registry-not-found response." >> "$GITHUB_STEP_SUMMARY"
+          echo "A registered name requires authenticated maintainer verification before release." >> "$GITHUB_STEP_SUMMARY"
