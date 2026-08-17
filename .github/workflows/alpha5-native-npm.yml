@@ -100,7 +100,7 @@ jobs:
           python scripts/audit_npm_tarball.py "build/tarballs/codex-rescue-0.1.0-alpha.5.tgz" --kind top
 
       - name: Prepare local npm smoke project
-        run: python -c "from pathlib import Path; p=Path('build/npm-smoke'); p.mkdir(parents=True, exist_ok=True); (p/'package.json').write_text('{\"private\":true,\"name\":\"codex-rescue-smoke\",\"version\":\"0.0.0\"}', encoding='utf-8')"
+        run: python scripts/prepare_npm_smoke.py
 
       - name: Install local npm tarballs with lifecycle scripts disabled
         working-directory: build/npm-smoke
@@ -134,5 +134,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: No runtime downloader, shell execution, lifecycle installer, or package over-inclusion
+      - name: No runtime downloader, Python bootstrap, shell execution, lifecycle installer, or package over-inclusion
         run: node --test npm/tests/*.test.cjs
