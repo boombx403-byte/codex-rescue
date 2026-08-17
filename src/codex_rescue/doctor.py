@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .alpha5 import Alpha5RolloutDiagnostics, ProjectionReport, inspect_projection_parity, scan_rollout_alpha5
+from .alpha5 import Alpha5RolloutDiagnostics, ProjectionReport, scan_rollout_alpha5
 from .gitstate import GitStateError, inspect_git_state
+from .projection import inspect_projection_parity
+from .schema_compat import SchemaCompatibilityReport, apply_schema_compatibility
 from .transcript import ParseResult, parse_transcript
 
 
@@ -40,6 +42,7 @@ class DoctorResult:
     repository: dict[str, Any]
     alpha5: Alpha5RolloutDiagnostics
     projection: ProjectionReport
+    schema_compatibility: SchemaCompatibilityReport
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,11 +53,24 @@ class DoctorResult:
             "repository": self.repository,
             "alpha5": self.alpha5.to_dict(),
             "projection": self.projection.to_dict(),
+            "schema_compatibility": self.schema_compatibility.to_dict(),
         }
+
+
+def _classify_git_error(exc: GitStateError) -> str:
+    text = str(exc).lower()
+    if "not a git repository" in text or "outside repository" in text:
+        return "non_git_workspace"
+    if "cwd does not exist" in text or "permission denied" in text or "access is denied" in text:
+        return "inaccessible_repository"
+    if "no such file or directory" in text or "not found" in text or "executable" in text:
+        return "git_unavailable"
+    return "git_unavailable_or_repository_inaccessible"
 
 
 def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> DoctorResult:
     parsed = parse_transcript(path, oversized_threshold=oversized_threshold)
+    schema_compatibility = apply_schema_compatibility(parsed)
     alpha5 = scan_rollout_alpha5(path)
     projection = inspect_projection_parity(path, parsed)
     findings: set[str] = set()
@@ -100,13 +116,11 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
             repository = inspect_git_state(cwd).to_dict()
             repository["classification"] = "git_available"
         except GitStateError as exc:
-            # An unavailable/non-Git/inaccessible repository is not evidence of
-            # divergence.  Keep the repository evidence explicitly unknown.
             repository = {
                 "cwd": cwd,
                 "error": str(exc),
                 "confidence": "unknown",
-                "classification": "git_unavailable_or_non_git",
+                "classification": _classify_git_error(exc),
             }
     else:
         repository = {"cwd": None, "confidence": "unknown", "classification": "no_workspace"}
@@ -122,4 +136,5 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         repository,
         alpha5,
         projection,
+        schema_compatibility,
     )
