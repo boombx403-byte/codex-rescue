@@ -84,7 +84,20 @@ class Alpha5ProjectionParityTests(unittest.TestCase):
             self._projection_db(root, offsets[-1], 3)
             diagnosis = doctor_session(path)
             self.assertEqual(diagnosis.projection.status, "exact")
+            self.assertEqual(diagnosis.projection.boundary_ordinal, 2)
             self.assertNotIn("WEDGED_PROJECTION", diagnosis.findings)
+            self.assertNotIn("PROJECTION_STATE_UNKNOWN", diagnosis.findings)
+
+    def test_eof_byte_boundary_with_stale_ordinal_is_unknown_not_healthy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, offsets = self._write_paginated(root, [0, 1, 2])
+            self._projection_db(root, offsets[-1], 2)
+            diagnosis = doctor_session(path)
+            self.assertEqual(diagnosis.projection.status, "unknown")
+            self.assertIn("next ordinal disagrees", diagnosis.projection.reason)
+            self.assertIn("PROJECTION_STATE_UNKNOWN", diagnosis.findings)
+            self.assertNotEqual(diagnosis.status, "HEALTHY")
 
     def test_missing_projection_db_is_not_corruption(self):
         with tempfile.TemporaryDirectory() as directory:
