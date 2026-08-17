@@ -26,8 +26,6 @@ env:
 jobs:
   verify-release:
     runs-on: ubuntu-latest
-    outputs:
-      bundle_path: ${{ steps.bundle.outputs.bundle_path }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,9 +40,16 @@ jobs:
           test "$RELEASE_TAG" = "$EXPECTED_TAG"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$EXPECTED_SHA"
-          test "$(python -c 'import codex_rescue; print(codex_rescue.__version__)')" = "$EXPECTED_PYTHON_VERSION"
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+          expected = os.environ['EXPECTED_PYTHON_VERSION']
+          text = Path('src/codex_rescue/__init__.py').read_text(encoding='utf-8')
+          match = re.search(r'__version__\s*=\s*["\']([^"\']+)', text)
+          if not match or match.group(1) != expected:
+              raise SystemExit(f'Python version mismatch: expected {expected}')
+          PY
       - name: Verify candidate run and download exact bundle
-        id: bundle
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ inputs.candidate_run_id }}
@@ -54,11 +59,12 @@ jobs:
           set -euo pipefail
           gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > candidate-run.json
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           data=json.loads(Path('candidate-run.json').read_text())
           if data.get('conclusion') != 'success': raise SystemExit('candidate run is not successful')
           if not str(data.get('path','')).endswith('alpha5-release-candidate.yml'): raise SystemExit('wrong candidate workflow')
+          if data.get('head_sha') != os.environ['EXPECTED_SHA']: raise SystemExit('candidate run head SHA mismatch')
           PY
           mkdir candidate
           gh run download "$RUN_ID" -n alpha5-release-bundle -D candidate
@@ -76,7 +82,6 @@ jobs:
               actual=hashlib.sha256(path.read_bytes()).hexdigest()
               if actual != digest: raise SystemExit(f'candidate hash mismatch {name}')
           PY
-          echo "bundle_path=${GITHUB_WORKSPACE}/candidate" >> "$GITHUB_OUTPUT"
       - name: Verify published GitHub prerelease and download exact assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,7 +91,7 @@ jobs:
           set -euo pipefail
           gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > release.json
           python - <<'PY'
-          import json, os
+          import hashlib, json, os
           from pathlib import Path
           rel=json.loads(Path('release.json').read_text())
           manifest=json.loads(Path('candidate/release-manifest.json').read_text())
@@ -98,12 +103,10 @@ jobs:
           names={a.get('name') for a in assets}
           if names != expected: raise SystemExit(f'release asset set mismatch: {sorted(names)}')
           expected_hashes=dict(manifest['files'])
-          import hashlib
           for extra in ('release-manifest.json','SHA256SUMS'):
               expected_hashes[extra]=hashlib.sha256((Path('candidate')/extra).read_bytes()).hexdigest()
           for asset in assets:
-              digest=asset.get('digest')
-              if digest != 'sha256:' + expected_hashes[asset['name']]:
+              if asset.get('digest') != 'sha256:' + expected_hashes[asset['name']]:
                   raise SystemExit(f'GitHub asset digest mismatch: {asset["name"]}')
           PY
           mkdir release-assets
@@ -218,7 +221,7 @@ jobs:
           identity="$(npm whoami)"
           for pkg in codex-rescue-linux-x64 codex-rescue-win32-x64 codex-rescue-darwin-arm64 codex-rescue-darwin-x64; do
             test "$(npm view "${pkg}@0.1.0-alpha.5" version)" = "0.1.0-alpha.5"
-            npm view "$pkg" maintainers --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);const who=process.env.NPM_ID;const names=(Array.isArray(m)?m:[m]).map(x=>typeof x==="string"?x:x&&x.name);if(!names.includes(who))process.exit(1)})' NPM_ID="$identity"
+            npm view "$pkg" maintainers --json | NPM_ID="$identity" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);const who=process.env.NPM_ID;const names=(Array.isArray(m)?m:[m]).map(x=>typeof x==="string"?x:x&&x.name);if(!names.includes(who))process.exit(1)})'
           done
           if npm view codex-rescue@0.1.0-alpha.5 version >/dev/null 2>&1; then
             echo "STOP: codex-rescue@0.1.0-alpha.5 already exists" >&2
