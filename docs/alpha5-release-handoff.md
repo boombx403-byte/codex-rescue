@@ -7,7 +7,6 @@ Operational handoff for Codex Rescue `0.1.0a5` / npm `0.1.0-alpha.5`.
 - `PR_NUMBER`: `4`
 - `PR_STATE`: `Draft` — keep Draft until explicit release authorization.
 - `QUALIFIED_SOURCE_SHA`: **the exact current PR #4 head that has green Core CI, Alpha5 qualification, Native/NPM, and registry preflight.** Do not trust a hardcoded SHA in this tracked file: changing this file changes the commit SHA. Resolve PR #4 immediately before release and bind every later step to that exact value.
-- `LAST_PRE_HANDOFF_AUDITED_SHA`: `ccdcfa132a8e3b69f927e142da915e9372f18cdd`
 - `EXPECTED_PYTHON_VERSION`: `0.1.0a5`
 - `EXPECTED_NPM_VERSION`: `0.1.0-alpha.5`
 - `EXPECTED_TAG`: `v0.1.0-alpha.5`
@@ -42,9 +41,9 @@ A green run for any different SHA does not qualify the release source.
 3. Merge PR #4 without rewriting the qualified branch before merge. Record the resulting merge SHA.
 4. Verify the merged source still reports Python `0.1.0a5`, npm `0.1.0-alpha.5`, and the five package names above.
 5. Create `v0.1.0-alpha.5` at the exact intended release SHA. Immediately verify the tag resolves to that SHA.
-6. Dispatch `Alpha5 Release Candidate` with `release_tag=v0.1.0-alpha.5` and `expected_sha=<exact release SHA>`. Require success. Record its workflow run ID and download `alpha5-release-bundle`.
+6. Dispatch `Alpha5 Release Candidate` **at workflow ref `v0.1.0-alpha.5`** with `release_tag=v0.1.0-alpha.5` and `expected_sha=<exact release SHA>`. Require success. Record its workflow run ID and download `alpha5-release-bundle`. A run dispatched from a different workflow ref must be rejected if its `head_sha` is not the expected release SHA.
 7. Verify `release-manifest.json`, `SHA256SUMS`, and the complete expected artifact set. Create the GitHub **prerelease** for `v0.1.0-alpha.5`, targeting the exact same SHA, and attach exactly the candidate bundle files.
-8. Dispatch `Publish Alpha5` with the exact tag, exact release SHA, and successful candidate run ID. It must first re-verify tag/SHA, candidate run/source SHA, GitHub prerelease assets/hashes, PyPI absence, and npm identity/name ownership.
+8. Dispatch `Publish Alpha5` **at workflow ref `v0.1.0-alpha.5`** with the exact tag, exact release SHA, and successful candidate run ID. It must first re-verify tag/SHA, candidate run/source SHA, GitHub prerelease assets/hashes, PyPI absence, and npm identity/name ownership.
 9. Allow Python Trusted Publishing only after the verification job succeeds.
 10. Allow npm platform publication in deterministic order: Linux x64, Windows x64, macOS arm64, macOS x64.
 11. Confirm all four exact platform versions are public and owned by the authenticated npm identity; then publish `codex-rescue@0.1.0-alpha.5` **last**.
