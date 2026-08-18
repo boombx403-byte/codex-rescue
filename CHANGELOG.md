@@ -16,10 +16,12 @@ All notable changes to Codex Rescue are documented here.
 - Persisted lifecycle diagnostics that distinguish historical start/terminal records from unavailable live state.
 - Conservative `INTERRUPTED_INPUT_NOT_DURABLE` evidence for a retained `task_started` → abort/interruption boundary with no durable submitted-user marker; Rescue explicitly does not recreate prompt text that was never persisted.
 - Explicit workspace-portability evidence for WSL `/mnt/<drive>` versus Windows-native drive paths, including `WORKSPACE_CONTEXT_MISMATCH` only when the persisted path family conflicts with the runtime and the saved repository cwd is inaccessible.
+- Read-only rollout-migration consistency diagnostics: `SUBAGENT_HISTORY_BOUNDARY_SUSPECT` for the exact zero-based paginated EOF-boundary shape reported in migrated subagents, and `THREAD_NAME_METADATA_DIVERGED` when a legacy `session_index.jsonl` name survives while paginated SQLite metadata has no name.
+- Privacy-bounded name-divergence evidence stores only name presence, length, and SHA256; raw thread names are not emitted by the diagnostic report.
 - Format-only opaque-content classification for recognized legacy opaque envelopes, the reported foreign `ocx1:` marker, unknown opaque values, and malformed fields; no decryption or account-key diagnosis.
 - Zero-byte/header-only and changed-during-scan diagnostics.
 - Bounded large-rollout aggregates for physical record size, bounded overflows, inline-media indicators, and compaction counts without base64 decoding.
-- Alpha5 synthetic regression suites for projection, discovery, schema compatibility, typed IDs, tool correlation, writer/lifecycle semantics, interrupted-input persistence boundaries, workspace portability, opaque formats, incomplete rollouts, and bounded large-record scanning.
+- Alpha5 synthetic regression suites for projection, discovery, migration consistency, schema compatibility, typed IDs, tool correlation, writer/lifecycle semantics, interrupted-input persistence boundaries, workspace portability, opaque formats, incomplete rollouts, and bounded large-record scanning.
 - Standalone executable build entrypoint using PyInstaller.
 - Thin npm launcher and unscoped platform packages for Linux x64, Windows x64, macOS arm64, and macOS x64.
 - npm package allowlist/security tests, local tarball assembly/audit helpers, SHA256 recording, structured Python/native/npm JSON parity tooling, and fail-closed npm registry-name/PyPI preflight.
@@ -33,8 +35,9 @@ All notable changes to Codex Rescue are documented here.
 
 - Python package version is `0.1.0a5`; npm mapping is `0.1.0-alpha.5`.
 - `sessions` now treats compatible SQLite/sidebar state as enrichment instead of the only inventory authority.
-- `doctor` now includes Alpha5 aggregate diagnostics, projection state, schema-compatibility aggregation, bounded interrupted-input evidence, workspace-portability evidence, and more precise repository evidence classifications.
+- `doctor` now includes Alpha5 aggregate diagnostics, projection state, schema-compatibility aggregation, bounded interrupted-input evidence, workspace-portability evidence, migration-consistency evidence, and more precise repository evidence classifications.
 - The interrupted-input check reuses the parser's bounded retained event tail instead of adding another full rollout pass, preserving Alpha5's large-rollout I/O model.
+- Migration consistency reads are bounded and read-only: one SessionMeta head record, bounded `session_index.jsonl`, and newest compatible `state_N.sqlite` candidates.
 - The README is rewritten around actual Alpha5 capabilities, safety boundaries, target npm/native distribution, and prerelease status.
 - Build-only freezer and Python packaging tool versions used by Alpha5 qualification/release-candidate workflows are pinned to the versions qualified in CI to reduce release drift.
 
@@ -53,6 +56,7 @@ All notable changes to Codex Rescue are documented here.
 - Alpha5 does not invent missing tool results or infer that a tool failed to execute merely because persisted output is absent.
 - Alpha5 does not fabricate or reconstruct a submitted prompt when the durable rollout has no prompt record; an interrupted-input finding is boundary evidence only.
 - Workspace portability diagnostics are read-only hints; Rescue does not rewrite WSL/Windows paths in rollout, SQLite, or global state.
+- Migration-consistency findings describe derived presentation/metadata divergence only; they do not claim raw transcript data loss and do not rewrite SessionMeta, `session_index.jsonl`, or SQLite.
 - The npm launcher does not download binaries at runtime, invoke a shell, bootstrap Python, or include telemetry.
 - Alpha5 public distribution is limited to the GitHub Release standalone binaries and npm/npx; the Python implementation remains in build/test qualification but is not published to PyPI for Alpha5.
 - Ordinary pull-request CI does not publish Alpha5, create an Alpha5 tag, or merge the Alpha5 branch.
@@ -66,6 +70,8 @@ All notable changes to Codex Rescue are documented here.
 - Discovery remains bounded to supported rollout roots and bounded immediate Codex-home DB inspection.
 - Alpha5 adds a second bounded sequential rollout scan for aggregate diagnostics; memory is bounded but I/O increases on very large files.
 - Interrupted-input detection is limited to the parser's bounded retained event window; absence of a finding does not prove every historical prompt was durable.
+- The migrated-subagent boundary detector intentionally recognizes only the exact reported zero-based paginated EOF-boundary shape; other or future ordinal schemes remain unclassified rather than guessed.
+- Thread-name divergence requires both a readable local `session_index.jsonl` entry and compatible paginated SQLite thread metadata; missing stores remain unknown/not-applicable.
 - Writer/lifecycle/opaque-format conclusions are structural diagnostics only and do not claim live process state or upstream root cause.
 - Rescue still does not fix upstream Codex transport, Desktop/UI, remote/mobile hydration, compaction service, API, app-server locking, process lifecycle, or cross-platform state migration defects.
 - Release publication remains gated on the exact candidate build, tag/SHA integrity, npm identity/ownership, and public GitHub/npm artifact verification.
