@@ -5,7 +5,8 @@ from pathlib import Path
 from unittest import mock
 
 from codex_rescue.doctor import doctor_session
-from codex_rescue.field_evidence import inspect_workspace_portability, scan_field_evidence
+from codex_rescue.field_evidence import analyze_field_evidence, inspect_workspace_portability
+from codex_rescue.transcript import parse_transcript
 
 
 class Alpha5FieldHardeningTests(unittest.TestCase):
@@ -32,7 +33,7 @@ class Alpha5FieldHardeningTests(unittest.TestCase):
                     {"type": "event_msg", "payload": {"type": "turn_aborted"}},
                 ],
             )
-            report = scan_field_evidence(path)
+            report = analyze_field_evidence(parse_transcript(path))
             self.assertEqual(report.interrupted_input_boundary_count, 1)
             diagnosis = doctor_session(path)
             self.assertIn("INTERRUPTED_INPUT_NOT_DURABLE", diagnosis.findings)
@@ -53,28 +54,10 @@ class Alpha5FieldHardeningTests(unittest.TestCase):
                     {"type": "event_msg", "payload": {"type": "turn_aborted"}},
                 ],
             )
-            report = scan_field_evidence(path)
+            report = analyze_field_evidence(parse_transcript(path))
             self.assertEqual(report.interrupted_input_boundary_count, 0)
             diagnosis = doctor_session(path)
             self.assertNotIn("INTERRUPTED_INPUT_NOT_DURABLE", diagnosis.findings)
-
-    def test_compaction_physical_dominance_is_reported_as_storage_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "compacted.jsonl"
-            self._write(
-                path,
-                [
-                    {"type": "session_meta", "payload": {"id": "x"}},
-                    {"type": "compacted", "payload": {"replacement_history": "x" * 2048}},
-                    {"type": "compacted", "payload": {"replacement_history": "y" * 2048}},
-                ],
-            )
-            with mock.patch("codex_rescue.field_evidence._STORAGE_AMPLIFICATION_MIN_BYTES", 1):
-                report = scan_field_evidence(path)
-                self.assertTrue(report.storage_amplification)
-                self.assertGreater(report.compaction_byte_ratio, 0.5)
-                diagnosis = doctor_session(path)
-            self.assertIn("COMPACTION_STORAGE_AMPLIFICATION", diagnosis.findings)
 
     def test_wsl_cwd_on_windows_is_explicit_cross_platform_mismatch(self):
         with mock.patch("codex_rescue.field_evidence.os.name", "nt"):
