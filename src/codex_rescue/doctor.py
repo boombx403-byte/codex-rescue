@@ -12,6 +12,7 @@ from .field_evidence import (
     inspect_workspace_portability,
 )
 from .gitstate import GitStateError, inspect_git_state
+from .migration_consistency import MigrationConsistencyReport, inspect_migration_consistency
 from .projection import inspect_projection_parity
 from .schema_compat import SchemaCompatibilityReport, apply_schema_compatibility
 from .transcript import ParseResult, parse_transcript
@@ -35,6 +36,8 @@ SEVERITY = [
     "UNFINISHED_TOOL_CALL",
     "COMPACTION_STATE_LOSS",
     "REPO_STATE_DIVERGED",
+    "SUBAGENT_HISTORY_BOUNDARY_SUSPECT",
+    "THREAD_NAME_METADATA_DIVERGED",
     "INTERRUPTED_INPUT_NOT_DURABLE",
     "WORKSPACE_CONTEXT_MISMATCH",
     "HEALTHY",
@@ -53,6 +56,7 @@ class DoctorResult:
     schema_compatibility: SchemaCompatibilityReport
     field_evidence: FieldEvidenceReport
     workspace_portability: WorkspacePortabilityReport
+    migration_consistency: MigrationConsistencyReport
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +70,7 @@ class DoctorResult:
             "schema_compatibility": self.schema_compatibility.to_dict(),
             "field_evidence": self.field_evidence.to_dict(),
             "workspace_portability": self.workspace_portability.to_dict(),
+            "migration_consistency": self.migration_consistency.to_dict(),
         }
 
 
@@ -85,6 +90,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     schema_compatibility = apply_schema_compatibility(parsed)
     alpha5 = scan_rollout_alpha5(path)
     field_evidence = analyze_field_evidence(parsed)
+    migration_consistency = inspect_migration_consistency(path, parsed)
     projection = inspect_projection_parity(path, parsed)
     findings: set[str] = set()
     if parsed.corruption_class:
@@ -117,6 +123,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
 
     if field_evidence.interrupted_input_boundary_count:
         findings.add("INTERRUPTED_INPUT_NOT_DURABLE")
+    findings.update(migration_consistency.findings)
 
     if projection.status == "wedged":
         findings.add("WEDGED_PROJECTION")
@@ -166,4 +173,5 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         schema_compatibility,
         field_evidence,
         workspace_portability,
+        migration_consistency,
     )
