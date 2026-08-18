@@ -10,36 +10,50 @@ The core commands are `sessions`, `doctor`, `salvage`, and `verify`. Alpha5 adds
 
 Codex Rescue does **not** fix upstream Codex transport, Desktop renderer, API, compaction-service, locking, cross-platform state migration, or authentication bugs.
 
-## Alpha5 official installation
+## Alpha5 distribution channels
 
-### npm/npx
+Alpha5 is prepared as a coordinated release across three official channels:
 
-Alpha5 is distributed through npm/npx:
+1. **npm / npx** (`codex-rescue@0.1.0-alpha.5`)
+2. **PyPI** (`codex-rescue==0.1.0a5`)
+3. **GitHub Release standalone binaries** (`v0.1.0-alpha.5`)
+
+> [!NOTE]
+> Alpha5 is currently in target / prepared / qualified status. Public publication will occur once the npm publication window/account gate opens.
+
+### npm / npx
+
+Run directly without local installation:
 
 ```bash
 npx codex-rescue@0.1.0-alpha.5 --help
 ```
 
-The npm design does not install Python. A small Node launcher selects an installed platform package and starts its bundled standalone executable. It has no runtime binary downloader, no `curl | shell` path, no telemetry, and no `shell=true` execution.
-
-## Global npm install
+Or install globally via npm:
 
 ```bash
 npm install -g codex-rescue@0.1.0-alpha.5
 codex-rescue --help
 ```
 
-## Standalone GitHub Release
+The npm distribution does not require Python. A lightweight, shell-free Node launcher resolves the installed platform package and spawns its bundled standalone executable. It contains no runtime downloader, no `curl | sh` execution, no telemetry, and no `shell=true` process spawning.
 
-The Alpha5 GitHub prerelease contains standalone binaries for Linux x64,
-Windows x64, macOS arm64, and macOS x64. Use the matching binary from the
-`v0.1.0-alpha.5` GitHub Release when npm is not suitable.
+### PyPI (Python)
 
-## Python development
+Once publicly published to PyPI, install via `pip` or preferably `pipx`:
 
-Python remains the canonical implementation and is still covered by tests and
-build qualification. PyPI is intentionally **not** an Alpha5 distribution
-channel; use a checked-out source branch for Python development:
+```bash
+pip install codex-rescue==0.1.0a5
+```
+
+Or using `pipx` for isolated CLI execution:
+
+```bash
+pipx install codex-rescue==0.1.0a5
+codex-rescue --help
+```
+
+For local source development:
 
 ```bash
 python -m pip install -e .
@@ -47,6 +61,16 @@ codex-rescue --help
 ```
 
 The Python package has no runtime dependencies outside the standard library and requires Python 3.11 or newer.
+
+### Standalone GitHub Release binaries
+
+The Alpha5 GitHub prerelease provides standalone binaries for:
+- Linux x64 (`codex-rescue-linux-x64`)
+- Windows x64 (`codex-rescue-win32-x64.exe`)
+- macOS arm64 (`codex-rescue-darwin-arm64`)
+- macOS x64 (`codex-rescue-darwin-x64`)
+
+Download the matching binary from the `v0.1.0-alpha.5` GitHub Release when npm is not suitable.
 
 ## Quick start
 
@@ -304,16 +328,15 @@ Alpha5 currently performs an additional bounded linear scan for these aggregates
 - Rescue does not fix upstream Codex networking, remote compaction, Desktop UI/renderer, app-server locking, process lifecycle, API, cross-platform state migration, or service bugs.
 - No in-place SQLite repair is provided in Alpha5.
 
-## npm ↔ Python version mapping
+## Version mapping
 
-| Distribution surface | Alpha5 version |
-|---|---|
-| Python implementation/build version | `0.1.0a5` (not a PyPI Alpha5 channel) |
-| npm top/platform packages | `0.1.0-alpha.5` |
-| Intended GitHub tag | `v0.1.0-alpha.5` |
+| Distribution surface | Alpha5 version | Distribution channel |
+|---|---|---|
+| Python package (PyPI / source) | `0.1.0a5` | PyPI / local source |
+| npm top & platform packages | `0.1.0-alpha.5` | npm registry |
+| GitHub Release tag | `v0.1.0-alpha.5` | GitHub Releases |
 
-The Alpha5 tag is `v0.1.0-alpha.5` and remains bound to the qualified release
-source. Do not move or recreate it.
+The Alpha5 tag is `v0.1.0-alpha.5` and remains bound to the qualified release source. Do not move or recreate it.
 
 ## Development/testing
 

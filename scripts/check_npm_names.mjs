@@ -8,10 +8,11 @@ const packages = [
 ];
 
 function npm(args) {
-  return spawnSync('npm', args, {
+  const exe = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return spawnSync(exe, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    shell: false,
+    shell: process.platform === 'win32',
     env: { ...process.env, npm_config_registry: 'https://registry.npmjs.org' },
   });
 }

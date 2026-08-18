@@ -2,7 +2,7 @@
 
 All notable changes to Codex Rescue are documented here.
 
-## v0.1.0-alpha.5 — GitHub/npm release; PyPI intentionally omitted
+## v0.1.0-alpha.5 — Coordinated release across npm, PyPI, and GitHub standalone binaries
 
 ### Added
 
@@ -27,7 +27,7 @@ All notable changes to Codex Rescue are documented here.
 - npm package allowlist/security tests, local tarball assembly/audit helpers, SHA256 recording, structured Python/native/npm JSON parity tooling, and fail-closed npm registry-name/PyPI preflight.
 - Cross-platform core CI plus Alpha5 Python qualification and native/npm build/smoke/parity workflows.
 - Manual-only deterministic Alpha5 release-candidate workflow that binds the exact tag and source SHA, rebuilds Python/native/npm artifacts, verifies the exact expected artifact set, and emits a SHA256 manifest.
-- Manual-only Alpha5 npm publish workflow that verifies the candidate run, exact GitHub prerelease asset hashes, npm identity/name ownership gates, publishes platform npm packages first, and publishes the npm meta package last. PyPI is intentionally not an Alpha5 distribution channel.
+- Manual-only Alpha5 publication workflows for npm and PyPI Trusted Publishing that verify the candidate run, exact GitHub prerelease asset hashes, and publisher gates.
 - `docs/alpha5-field-validation.md` field-evidence traceability, including upstream/mobile and WebSocket negative controls that must not become fabricated local-corruption diagnoses.
 - `docs/alpha5-release-handoff.md` operational stop conditions and deterministic release sequence.
 
@@ -58,7 +58,7 @@ All notable changes to Codex Rescue are documented here.
 - Workspace portability diagnostics are read-only hints; Rescue does not rewrite WSL/Windows paths in rollout, SQLite, or global state.
 - Migration-consistency findings describe derived presentation/metadata divergence only; they do not claim raw transcript data loss and do not rewrite SessionMeta, `session_index.jsonl`, or SQLite.
 - The npm launcher does not download binaries at runtime, invoke a shell, bootstrap Python, or include telemetry.
-- Alpha5 public distribution is limited to the GitHub Release standalone binaries and npm/npx; the Python implementation remains in build/test qualification but is not published to PyPI for Alpha5.
+- Alpha5 official release channels are npm/npx, PyPI (`codex-rescue==0.1.0a5`), and standalone GitHub Release binaries. PyPI publication uses GitHub OIDC Trusted Publishing with fail-closed candidate verification.
 - Ordinary pull-request CI does not publish Alpha5, create an Alpha5 tag, or merge the Alpha5 branch.
 - Remote/iOS hydration failures and WebSocket retry/close behavior are upstream-only evidence; Rescue does not claim to observe or repair them.
 - Large persisted history/payload evidence may increase diagnostic concern but is not encoded as a definitive cause of mobile/UI failure.

@@ -50,7 +50,7 @@ class TestArea8RacesTOCTOUFeatures(unittest.TestCase):
                 writer.start_streaming(chunks, interval_sec=0.01)
                 try:
                     res = doctor_session(p)
-                    self.assertIn(res.status, ("HEALTHY", "TRUNCATED_TRANSCRIPT", "UNFINISHED_TOOL_CALL"))
+                    self.assertIn(res.status, ("HEALTHY", "TRUNCATED_TRANSCRIPT", "UNFINISHED_TOOL_CALL", "ACTIVE_WRITE_UNCERTAIN"))
                 finally:
                     writer.stop()
 

@@ -11,15 +11,17 @@ Operational handoff for Codex Rescue `0.1.0a5` / npm `0.1.0-alpha.5`.
 - `EXPECTED_NPM_VERSION`: `0.1.0-alpha.5`
 - `EXPECTED_TAG`: `v0.1.0-alpha.5`
 
-PYPI_ALPHA5_POLICY: NOT_PUBLISHED. PyPI is intentionally not an Alpha5
-distribution channel. Python remains the canonical implementation and stays
-in qualification/build coverage, but Alpha5 publication is GitHub plus npm.
+PYPI_ALPHA5_POLICY: OFFICIAL_RELEASE_CHANNEL. PyPI is an official Alpha5
+distribution channel alongside npm and GitHub standalone binaries.
+Publication uses PyPI Trusted Publishing / GitHub OIDC, bound to the exact
+release candidate artifacts and manifest hashes.
 
 Official Alpha5 distribution channels:
 
 - GitHub Release / standalone native binaries
 - `npx codex-rescue@0.1.0-alpha.5`
 - `npm install -g codex-rescue@0.1.0-alpha.5`
+- `pip install codex-rescue==0.1.0a5` / `pipx install codex-rescue==0.1.0a5`
 
 ## NPM package names
 
@@ -46,18 +48,28 @@ After PR #7 is merged, **do not publish immediately just because the PR head was
 
 ## Exact release sequence
 
-1. Resolve PR #7 and record its exact current head SHA. Confirm it is mergeable, based on current `main`, and all required exact-head CI above is green.
-2. Merge PR #7 without rewriting the qualified branch before merge. Record the resulting merge SHA.
-3. Verify the merged source still reports Python `0.1.0a5`, npm `0.1.0-alpha.5`, and the five package names above. Confirm no unrelated release-affecting commits were introduced between qualification and the intended tag.
-4. When npm publication is actually available and authorized, re-check all five npm names plus authenticated publisher identity/ownership. Stop if any name or identity gate changed.
-5. Create `v0.1.0-alpha.5` at the exact intended release SHA. Immediately verify the tag resolves to that SHA.
-6. Dispatch `Alpha5 Release Candidate` **at workflow ref `v0.1.0-alpha.5`** with `release_tag=v0.1.0-alpha.5` and `expected_sha=<exact release SHA>`. Require success. Record its workflow run ID and download `alpha5-release-bundle`. A run dispatched from a different workflow ref must be rejected if its `head_sha` is not the expected release SHA.
-7. Verify `release-manifest.json`, `SHA256SUMS`, and the complete expected artifact set. Create the GitHub **prerelease** for `v0.1.0-alpha.5`, targeting the exact same SHA, and attach exactly the candidate bundle files.
-8. Dispatch the npm-only `Publish Alpha5` workflow from current `main` with `release_tag=v0.1.0-alpha.5`, the exact release SHA, and the successful candidate run ID. The workflow must re-verify tag/SHA, candidate run/source SHA, GitHub prerelease assets/hashes, npm identity/name ownership, and version nonexistence.
-9. Publish npm platform packages in deterministic order: Linux x64, Windows x64, macOS arm64, macOS x64.
-10. Confirm each platform package version, integrity, shasum, and maintainer immediately after publication.
-11. Confirm all four exact platform versions are public and owned by the authenticated npm identity; then publish `codex-rescue@0.1.0-alpha.5` **last** and verify its optional dependencies.
-12. Perform public npm/npx and GitHub checks below. Stop on any mismatch; do not attempt destructive rollback of immutable package versions/tags.
+1. **Resolve exact release source SHA:** Resolve PR #7 and record its exact current head SHA. Confirm it is mergeable, based on current `main`, and all required exact-head CI above is green.
+2. **Merge PR #7:** Merge PR #7 without rewriting the qualified branch before merge. Record the resulting `MAIN_MERGE_SHA`.
+3. **Verify versions on main:** Verify the merged source reports Python `0.1.0a5`, npm `0.1.0-alpha.5`, and the five package names. Confirm no unrelated commits exist between qualification and the intended tag.
+4. **Re-check npm package availability/ownership:** Re-check all five npm package names and publisher identity/rights. Stop if any name or identity gate changed.
+5. **Re-check PyPI:** Confirm `codex-rescue==0.1.0a5` does not unexpectedly exist on PyPI (`404 Not Found`).
+6. **Create git tag:** Create `v0.1.0-alpha.5` at the exact intended release SHA.
+7. **Verify tag:** Verify `v0.1.0-alpha.5` resolves to the exact intended release SHA.
+8. **Build and qualify candidate:** Dispatch `Alpha5 Release Candidate` **at workflow ref `v0.1.0-alpha.5`** with `release_tag=v0.1.0-alpha.5` and `expected_sha=<exact release SHA>`. Require success. Record workflow run ID and download `alpha5-release-bundle`.
+9. **Verify candidate manifest:** Verify `release-manifest.json`, `SHA256SUMS`, and the complete 11-artifact candidate set.
+10. **Create GitHub prerelease:** Create the GitHub **prerelease** for `v0.1.0-alpha.5`, targeting the exact same SHA, and attach exactly the candidate bundle files.
+11. **Publish to PyPI:** Dispatch `Publish Alpha5 to PyPI` workflow with `release_tag=v0.1.0-alpha.5`, `expected_sha=<exact release SHA>`, and `candidate_run_id=<run ID>`. The workflow publishes the exact qualified wheel and sdist to PyPI via Trusted Publishing.
+12. **Verify PyPI publication:** Verify PyPI exposes `codex-rescue==0.1.0a5` and file hashes match `release-manifest.json`.
+13. **Publish npm platform packages:** Dispatch `Publish Alpha5` workflow to publish platform packages in deterministic order: Linux x64, Windows x64, macOS arm64, macOS x64.
+14. **Verify platform packages:** Confirm each platform package version, integrity, shasum, and maintainer on npm registry.
+15. **Publish npm meta package last:** Publish `codex-rescue@0.1.0-alpha.5` **last** and verify its optional dependencies on npm registry.
+16. **Verify all install surfaces:**
+    - `npx codex-rescue@0.1.0-alpha.5 --version` / `--help`
+    - `npm install -g codex-rescue@0.1.0-alpha.5`
+    - `pip install codex-rescue==0.1.0a5`
+    - `pipx install codex-rescue==0.1.0a5`
+    - Standalone GitHub Release binaries on supported platforms.
+17. **Verify public artifact integrity:** Confirm all public artifact hashes match `release-manifest.json` and `SHA256SUMS`.
 
 ## Expected artifacts
 
@@ -81,11 +93,13 @@ Exact release-candidate bundle:
 
 - GitHub tag and prerelease resolve to the intended release SHA.
 - Download every GitHub release asset and verify SHA256 against `release-manifest.json` / `SHA256SUMS`.
+- PyPI exposes `codex-rescue==0.1.0a5` with matching wheel/sdist digests.
+- `pip install codex-rescue==0.1.0a5` and `pipx install codex-rescue==0.1.0a5` succeed.
 - npm exposes all four platform packages and the meta package at exactly `0.1.0-alpha.5`.
 - `npx codex-rescue@0.1.0-alpha.5 --version` and `--help` succeed on supported platforms without Python installed where practical.
 - `npm install -g codex-rescue@0.1.0-alpha.5` succeeds on supported platforms.
 - Public npm tarballs contain only their audited allowlisted files.
-- Candidate Python/native/npm qualification and structured parity remain required; public Alpha5 verification is GitHub and npm only.
+- Public Alpha5 verification spans GitHub, PyPI, and npm.
 
 ## Rollback / stop conditions
 
@@ -94,6 +108,7 @@ Stop immediately if any of these is true:
 - PR #7 head differs from the SHA whose required CI is green at merge time.
 - Any required exact-head CI is no longer green.
 - `main` changes in a way that changes the intended release source before tagging and the new source has not been requalified.
+- PyPI `0.1.0a5` unexpectedly already exists before explicit publication.
 - Any npm package name is no longer available/owned by the authenticated release identity.
 - `npm whoami` fails or does not match the expected publisher identity.
 - Any npm `0.1.0-alpha.5` unexpectedly already exists with different/unverified content.
@@ -101,7 +116,7 @@ Stop immediately if any of these is true:
 - Any candidate/GitHub-release artifact SHA256 differs from the manifest.
 - `v0.1.0-alpha.5` exists before the authorized tag step, or resolves to the wrong SHA.
 - GitHub prerelease target/tag/source SHA is not exact.
-- npm publication authentication or identity/ownership is unavailable or weaker than expected.
+- Trusted Publishing/OIDC or npm publication authentication is unavailable or weaker than expected.
 - Any publish workflow gate is skipped, disabled, or manually bypassed.
 
 ## Do not touch
