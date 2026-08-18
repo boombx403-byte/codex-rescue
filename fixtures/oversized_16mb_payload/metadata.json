@@ -1,7 +1,0 @@
-{
-  "fixture_name": "oversized_16mb_payload",
-  "description": "Synthetic privacy-safe fixture with JSONL record exceeding 16 MiB bounded limit",
-  "expected_primary_class": "OVERSIZED_PAYLOAD",
-  "expected_findings": ["OVERSIZED_PAYLOAD", "VALID_BUT_OVERSIZED"],
-  "allow_mutation": false
-}

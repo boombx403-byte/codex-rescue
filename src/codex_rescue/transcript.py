@@ -142,7 +142,7 @@ _OUTPUT_FAMILIES = {
 # call.
 _KNOWN_OPERATIONAL_TYPES = _CALL_FAMILIES | set(_OUTPUT_FAMILIES) | {"mcp_tool_call_end"}
 _OPERATIONAL_ENVELOPES = {"event_msg", "response_item"}
-MAX_RECORD_BYTES = 16 * 1024 * 1024
+MAX_RECORD_BYTES = 8 * 1024 * 1024
 MAX_RETAINED_FINDINGS = 128
 MAX_CORRELATION_STATES = 1024
 MAX_OCCURRENCES_PER_ID = 2
@@ -257,30 +257,34 @@ def _read_line_bounded(
     stream: Any,
     max_bytes: int = MAX_RECORD_BYTES,
     digest: Any | None = None,
-) -> tuple[bytes, bool, int]:
+) -> tuple[bytes, bool, int, bool]:
     """Read one JSONL line without allowing an attacker-sized allocation.
 
     ``readline(size)`` caps the initial allocation; an oversized line is then
     drained in fixed chunks so hashing and offsets remain exact.
+    Returns: (line_prefix, is_oversized, total_bytes, has_nul)
     """
 
     limit = max(1, int(max_bytes))
     line = stream.readline(limit + 1)
     if not line:
-        return b"", False, 0
+        return b"", False, 0, False
     if digest is not None:
         digest.update(line)
     total = len(line)
+    has_nul = b"\x00" in line
     if len(line) <= limit:
-        return line, False, total
+        return line, False, total, has_nul
     oversized = True
     if line.endswith(b"\n"):
-        return line, oversized, total
+        return line, oversized, total, has_nul
     ended_with_newline = False
     while True:
         chunk = stream.readline(64 * 1024)
         if not chunk:
             break
+        if b"\x00" in chunk:
+            has_nul = True
         total += len(chunk)
         if digest is not None:
             digest.update(chunk)
@@ -289,7 +293,7 @@ def _read_line_bounded(
             break
     if ended_with_newline and not line.endswith(b"\n"):
         line = line + b"\n"
-    return line, oversized, total
+    return line, oversized, total, has_nul
 
 
 def parse_transcript(
@@ -318,12 +322,11 @@ def parse_transcript(
     with source.open("rb") as stream:
         while True:
             start = offset
-            line, line_oversized, consumed = _read_line_bounded(stream, max_record_bytes, digest)
+            line, line_oversized, consumed, has_nul = _read_line_bounded(stream, max_record_bytes, digest)
             if not line:
                 break
             offset += consumed
             complete_line = line.endswith(b"\n")
-            has_nul = b"\x00" in line
             if line_oversized:
                 if result.first_invalid_offset is None:
                     result.first_invalid_offset = start

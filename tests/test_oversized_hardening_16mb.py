@@ -94,7 +94,7 @@ def _create_synthetic_16mb_record(session_dir: Path, variant: str = "valid") -> 
 
 class Oversized16MBHardeningTests(unittest.TestCase):
     def test_max_record_bytes_constant(self) -> None:
-        self.assertEqual(MAX_RECORD_BYTES, 16 * 1024 * 1024)
+        self.assertEqual(MAX_RECORD_BYTES, 8 * 1024 * 1024)
 
     def test_valid_but_oversized_16mb_record(self) -> None:
         with tempfile.TemporaryDirectory() as td:
