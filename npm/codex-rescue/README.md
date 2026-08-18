@@ -36,6 +36,9 @@ npx codex-rescue doctor --latest
 # Batch analyze all local Codex sessions
 npx codex-rescue doctor --all
 
+# List and discover all local Codex sessions
+npx codex-rescue sessions
+
 # Explain any diagnostic finding code
 npx codex-rescue explain OVERSIZED_PAYLOAD
 ```
@@ -78,6 +81,7 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
 
 | Command | Purpose | Description |
 |---|---|---|
+| `sessions` | **Session Inventory** | Discovers and filters all local sessions on disk vs SQLite state (`--latest`, `--orphans`, `--unindexed`). |
 | `doctor` | **Health Inspection** | Deep structural, projection, tool-pairing, and ordinal diagnostics (`--all`, `--changed`, `--latest`). |
 | `explain` | **Finding Reference** | Self-contained explanations with exact evidence, risks, and recommended actions. |
 | `diff` | **Layer Divergence** | Compares raw rollout JSONL vs SQLite state DB vs Git repository state. |
