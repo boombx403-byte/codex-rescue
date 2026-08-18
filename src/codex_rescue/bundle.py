@@ -36,30 +36,74 @@ def generate_support_bundle(
     output_bundle_path: Path | str | None = None,
     codex_home: Path | str | None = None,
 ) -> tuple[DiagnosticBundle, str | None]:
+    """Generate a sanitized support bundle using strict allowlist-first field extraction
+
+    Layer 1: Strict schema allowlist extracts only safe metadata (counts, sizes, event kinds,
+             ordinals, byte offsets, hashes, boolean flags, error codes). No arbitrary text payloads.
+    Layer 2: Regex privacy audit scans entire JSON document for credentials, tokens, or unmasked home paths.
+    """
     path = Path(session_path).resolve()
     ev = collect_session_evidence(path, codex_home=codex_home)
     diff = diff_session(path, codex_home=codex_home)
     tl = build_timeline(path, max_events=200)
     schema = inspect_schemas(codex_home=codex_home, session_files=[path])
 
+    # Allowlist-only projection for timeline events:
+    safe_events = [
+        {
+            "index": e.index,
+            "event_type": e.event_type,
+            "ordinal": e.ordinal,
+            "timestamp": e.timestamp,
+            "byte_offset": e.byte_offset,
+            "record_size": e.record_size,
+        }
+        for e in tl.events[:50]
+    ]
+
+    # Allowlist-only projection for divergences:
+    safe_divergences = [
+        {
+            "dimension": d.dimension,
+            "divergence_type": d.divergence_type,
+            "note": d.note,
+        }
+        for d in diff.divergences
+    ]
+
     bundle = DiagnosticBundle(
-        session_id=ev.session_id,
+        session_id=str(ev.session_id),
         evidence_summary={
-            "session_path": ev.session_path,
-            "is_archived": ev.is_archived,
-            "size_bytes": ev.size_bytes,
-            "total_lines": ev.rollout.total_lines,
-            "turn_count": ev.rollout.turn_count,
-            "tool_call_count": ev.rollout.tool_call_count,
-            "compaction_count": ev.rollout.compaction_count,
+            "session_path": sanitize_path(ev.session_path),
+            "is_archived": bool(ev.is_archived),
+            "size_bytes": int(ev.size_bytes),
+            "total_lines": int(ev.rollout.total_lines),
+            "turn_count": int(ev.rollout.turn_count),
+            "tool_call_count": int(ev.rollout.tool_call_count),
+            "compaction_count": int(ev.rollout.compaction_count),
             "last_ordinal": ev.rollout.last_ordinal,
-            "status": ev.status,
-            "confidence": ev.confidence,
+            "status": str(ev.status),
+            "confidence": str(ev.confidence),
         },
-        findings=ev.findings,
-        state_diff=diff.to_dict(),
-        timeline={"total_events": tl.total_events, "events_sample": [e.to_dict() for e in tl.events[:50]]},
-        schema_info=schema.to_dict(),
+        findings=[str(f) for f in ev.findings],
+        state_diff={
+            "session_id": str(diff.session_id),
+            "is_aligned": bool(diff.is_aligned),
+            "divergences": safe_divergences,
+            "summary": str(diff.summary),
+        },
+        timeline={
+            "total_events": int(tl.total_events),
+            "events_sample": safe_events,
+        },
+        schema_info={
+            "rollout_generations": [str(g) for g in schema.rollout_generations],
+            "sqlite_db_versions": [int(v) for v in schema.sqlite_db_versions],
+            "recognized_record_kinds": [str(k) for k in schema.recognized_record_kinds],
+            "unknown_record_kinds": [str(k) for k in schema.unknown_record_kinds],
+            "schema_coverage_pct": float(schema.schema_coverage_pct),
+            "status": str(schema.status),
+        },
     )
 
     bundle_dict = bundle.to_dict()

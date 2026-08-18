@@ -38,6 +38,12 @@ KNOWN_RECORD_KINDS = {
 
 @dataclass
 class SchemaReport:
+    """Codex Rescue schema coverage report.
+
+    NOTE: The 'rollout_generations' values (such as 'standard_linear_v1', 'ordinal_sequenced_v1',
+    'paginated_v2') are Codex Rescue's internal diagnostic classification tags used to recognize
+    structural layout traits. They are NOT official upstream Codex schema identifiers.
+    """
     rollout_generations: list[str] = field(default_factory=list)
     sqlite_db_versions: list[int] = field(default_factory=list)
     recognized_record_kinds: list[str] = field(default_factory=list)
@@ -53,8 +59,9 @@ class SchemaReport:
     def render_text(self) -> str:
         lines = [
             "Codex Rescue Schema Compatibility Report\n",
+            "Note: Generation labels reflect Rescue-internal structural traits, not upstream Codex schema names.\n",
             f"Status: {self.status} (Coverage: {self.schema_coverage_pct:.1f}%)",
-            f"Rollout Generations: {', '.join(self.rollout_generations) or 'none detected'}",
+            f"Rollout Trait Generations: {', '.join(self.rollout_generations) or 'none detected'}",
             f"SQLite DB Generations: {', '.join(str(v) for v in self.sqlite_db_versions) or 'none detected'}",
             f"Recognized Record Kinds ({len(self.recognized_record_kinds)}): {', '.join(sorted(self.recognized_record_kinds))}",
         ]

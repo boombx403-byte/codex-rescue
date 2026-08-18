@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,35 @@ from .discovery_alpha5 import discover_sessions
 from .doctor import doctor_session
 from .evidence import collect_session_evidence
 from .redact import sanitize_path
+
+
+def compute_file_fingerprint(p: Path) -> dict[str, Any] | None:
+    try:
+        stat = p.stat()
+        mtime_ns = getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))
+        size = stat.st_size
+
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            head = f.read(4096)
+            h.update(head)
+            if size > 8192:
+                f.seek(max(0, size - 4096))
+                tail = f.read(4096)
+                h.update(tail)
+            elif size > 4096:
+                tail = f.read(size - 4096)
+                h.update(tail)
+
+        sample_hash = h.hexdigest()
+        return {
+            "mtime_ns": mtime_ns,
+            "size": size,
+            "sample_hash": sample_hash,
+            "mtime": stat.st_mtime,
+        }
+    except Exception:
+        return None
 
 
 @dataclass
@@ -106,7 +137,7 @@ def run_doctor_changed(
     if c_file.exists():
         try:
             raw = json.loads(c_file.read_text(encoding="utf-8"))
-            if raw.get("version") == 1 and isinstance(raw.get("entries"), dict):
+            if raw.get("version") == 2 and isinstance(raw.get("entries"), dict):
                 cache_data = raw["entries"]
         except Exception:
             cache_data = {}
@@ -119,21 +150,26 @@ def run_doctor_changed(
 
     unique_paths = sorted(list({p.resolve() for p in session_paths}))
     new_cache: dict[str, Any] = {}
+    now = time.time()
 
     for p in unique_paths:
         summary.sessions_scanned += 1
         p_str = str(p.resolve())
-        stat = p.stat()
-        mtime = stat.st_mtime
-        size = stat.st_size
+        fp = compute_file_fingerprint(p)
 
         cached_entry = cache_data.get(p_str)
-        if (
-            cached_entry
-            and cached_entry.get("mtime") == mtime
-            and cached_entry.get("size") == size
+        # Conservative fail-safe: if file was touched within last 2 seconds or fp missing or cache mismatched, rescan fully.
+        is_cache_valid = (
+            fp is not None
+            and (now - fp.get("mtime", 0.0) >= 2.0)
+            and cached_entry is not None
+            and cached_entry.get("mtime_ns") == fp["mtime_ns"]
+            and cached_entry.get("size") == fp["size"]
+            and cached_entry.get("sample_hash") == fp["sample_hash"]
             and "status" in cached_entry
-        ):
+        )
+
+        if is_cache_valid and cached_entry:
             st = cached_entry["status"]
             findings = cached_entry.get("findings", [])
             new_cache[p_str] = cached_entry
@@ -147,12 +183,15 @@ def run_doctor_changed(
                 st = "SCAN_EXCEPTION"
                 findings = ["SCAN_READ_ERROR"]
 
-            new_cache[p_str] = {
-                "mtime": mtime,
-                "size": size,
-                "status": st,
-                "findings": findings,
-            }
+            if fp:
+                new_cache[p_str] = {
+                    "mtime_ns": fp["mtime_ns"],
+                    "size": fp["size"],
+                    "sample_hash": fp["sample_hash"],
+                    "mtime": fp["mtime"],
+                    "status": st,
+                    "findings": findings,
+                }
 
         if st == "HEALTHY":
             summary.healthy += 1
@@ -173,7 +212,7 @@ def run_doctor_changed(
     try:
         c_file.parent.mkdir(parents=True, exist_ok=True)
         c_file.write_text(
-            json.dumps({"version": 1, "entries": new_cache}, indent=2, ensure_ascii=False),
+            json.dumps({"version": 2, "entries": new_cache}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception:
