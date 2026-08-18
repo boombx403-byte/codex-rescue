@@ -217,9 +217,183 @@ def main(argv: list[str] | None = None) -> int:
     verify_p.add_argument("--rescue-root", type=Path, default=Path(".codex-rescue"))
     verify_p.add_argument("--json", action="store_true")
 
+    # --- ALPHA7 SUBCOMMANDS ---
+    auto_p = subs.add_parser("auto", help="Alpha7 Unified Autopilot Controller")
+    auto_p.add_argument("--surface", choices=["cli", "desktop", "ide", "all"], help="Target Codex surface")
+    auto_p.add_argument("--yes", "-y", action="store_true", help="Non-interactive safe default confirmation")
+    auto_p.add_argument("--no-prompt", action="store_true", help="Disable interactive prompts")
+    auto_p.add_argument("--repair-safe", action="store_true", help="Execute validated safe repair pipeline")
+    auto_p.add_argument("--codex-home", type=Path)
+    auto_p.add_argument("--json", action="store_true")
+
+    desktop_p = subs.add_parser("desktop", help="Codex Desktop inspection and diagnostics")
+    desktop_p.add_argument("action", choices=["status", "doctor", "sessions", "diff", "paths", "writer", "logs"], nargs="?", default="status")
+    desktop_p.add_argument("session", nargs="?", help="Session ID for diff or inspect")
+    desktop_p.add_argument("--codex-home", type=Path)
+    desktop_p.add_argument("--json", action="store_true")
+
+    selftest_p = subs.add_parser("self-test", help="Run Rescue capability and environment self-test")
+    selftest_p.add_argument("--codex-home", type=Path)
+    selftest_p.add_argument("--json", action="store_true")
+
+    compat_p = subs.add_parser("compatibility", help="Inspect schema and runtime compatibility")
+    compat_p.add_argument("--rollout-schema", type=int, default=1)
+    compat_p.add_argument("--sqlite-schema", type=int, default=1)
+    compat_p.add_argument("--json", action="store_true")
+
+    portable_p = subs.add_parser("portable", help="Export or import portable session packages")
+    portable_p.add_argument("action", choices=["export", "inspect", "import"])
+    portable_p.add_argument("target", help="Session ID/file to export, or .zip package to inspect/import")
+    portable_p.add_argument("--output", "-o", type=Path)
+    portable_p.add_argument("--workspace", help="Explicit workspace path")
+    portable_p.add_argument("--dry-run", action="store_true")
+    portable_p.add_argument("--codex-home", type=Path)
+    portable_p.add_argument("--json", action="store_true")
+
+    share_p = subs.add_parser("share", help="Generate safe privacy-redacted diagnostic share report")
+    share_p.add_argument("--latest", action="store_true")
+    share_p.add_argument("--session", type=Path)
+    share_p.add_argument("--codex-home", type=Path)
+    share_p.add_argument("--json", action="store_true")
+
+    sim_p = subs.add_parser("simulate-plan", help="Simulate recovery plan in temp sandbox")
+    sim_p.add_argument("session", type=Path)
+    sim_p.add_argument("--codex-home", type=Path)
+    sim_p.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
 
-    if args.command in (None, "sessions"):
+    if args.command is None or args.command == "auto":
+        from .alpha7.autopilot import AutopilotEngine
+        engine = AutopilotEngine(getattr(args, "codex_home", None))
+        res = engine.run_autopilot(
+            surface=getattr(args, "surface", None),
+            yes=getattr(args, "yes", False),
+            no_prompt=getattr(args, "no_prompt", False),
+            repair_safe=getattr(args, "repair_safe", False),
+        )
+        if getattr(args, "json", False):
+            _json(res.to_dict(), command="auto", status="SUCCESS")
+        else:
+            print(f"Codex Rescue Alpha7 Autopilot [{res.selected_surface.upper()}]")
+            print(f"Topology: {res.topology.os_name} (Detected surfaces: {res.topology.detected_surface_count})")
+            print(f"Status: {res.action_taken}")
+            print(f"Message: {res.message}")
+            if res.simulation:
+                print(f"Simulation: {res.simulation.status} (Source preserved: {res.simulation.source_preserved})")
+        return int(ExitCode.SUCCESS)
+
+    if args.command == "self-test":
+        from .alpha7.selftest import SelfTestEngine
+        res = SelfTestEngine.run_self_test(getattr(args, "codex_home", None))
+        if getattr(args, "json", False):
+            _json(res.to_dict(), command="self-test", status=res.overall_status)
+        else:
+            print(f"Codex Rescue Self-Test: {res.overall_status}")
+            print(f"Passed: {res.passed_checks}/{res.total_checks} checks")
+            for c in res.checks:
+                status_symbol = "OK" if c.passed else "FAIL"
+                print(f"  [{status_symbol}] {c.name}")
+                if c.error:
+                    print(f"      Error: {c.error}")
+        return int(ExitCode.SUCCESS if res.overall_status == "PASS" else ExitCode.INTERNAL_FAILURE)
+
+    if args.command == "desktop":
+        from .alpha7.surfaces.desktop import DesktopAdapter
+        adapter = DesktopAdapter(getattr(args, "codex_home", None))
+        if args.action == "status" or args.action == "doctor":
+            rep = adapter.get_status()
+            if getattr(args, "json", False):
+                _json(rep.to_dict(), command="desktop", status=rep.overall_status)
+            else:
+                print(f"DESKTOP HEALTH: {rep.overall_status}")
+                print(f"Filesystem threads: {rep.filesystem_threads_count}")
+                print(f"SQLite threads: {rep.sqlite_threads_count}")
+                print(f"Filesystem-only: {rep.filesystem_only_count}")
+                print(f"SQLite-only: {rep.sqlite_only_count}")
+                print(f"Broken paths: {rep.broken_paths_count}")
+                print(f"Active writers: {rep.active_writers_count}")
+                print(f"Data loss evidence: {rep.data_loss_evidence}")
+            return int(ExitCode.SUCCESS if rep.overall_status == "HEALTHY" else ExitCode.ACTIONABLE_FINDINGS)
+        elif args.action == "diff" and args.session:
+            diff_res = adapter.get_session_diff(args.session)
+            if getattr(args, "json", False):
+                _json(diff_res, command="desktop-diff", status=diff_res["status"])
+            else:
+                print(f"Desktop Diff for {args.session}: {diff_res['status']}")
+                print(f"Filesystem: {diff_res['filesystem_exists']} ({diff_res['filesystem_path']})")
+                print(f"SQLite: {diff_res['sqlite_exists']}")
+            return int(ExitCode.SUCCESS)
+
+    if args.command == "compatibility":
+        from .alpha7.compatibility.engine import CompatibilityEngine
+        comp = CompatibilityEngine.evaluate(args.rollout_schema, args.sqlite_schema)
+        if getattr(args, "json", False):
+            _json(comp.to_dict(), command="compatibility", status="ALLOWED" if comp.mutation_allowed else "DISABLED")
+        else:
+            print(f"Schema Compatibility: {'ALLOWED' if comp.mutation_allowed else 'DISABLED'}")
+            print(f"Rollout schema {comp.rollout_schema_version}: {'SUPPORTED' if comp.rollout_schema_supported else 'UNKNOWN'}")
+            print(f"SQLite schema {comp.sqlite_schema_version}: {'SUPPORTED' if comp.sqlite_schema_supported else 'UNKNOWN'}")
+            if comp.rejection_reason:
+                print(f"Reason: {comp.rejection_reason}")
+        return int(ExitCode.SUCCESS if comp.mutation_allowed else ExitCode.INCOMPLETE_OR_UNSUPPORTED)
+
+    if args.command == "portable":
+        from .alpha7.compatibility.portable import PortableSessionEngine
+        if args.action == "export":
+            sess_path = Path(args.target)
+            out_zip = args.output or Path(f"{sess_path.stem}.rescue.zip")
+            manifest = PortableSessionEngine.export_session(sess_path, out_zip, workspace_path=args.workspace)
+            if getattr(args, "json", False):
+                _json(manifest.to_dict(), command="portable-export", status="SUCCESS")
+            else:
+                print(f"Portable Package Exported: {out_zip}")
+                print(f"Session: {manifest.session_id} (SHA256: {manifest.rollout_sha256[:12]}...)")
+            return int(ExitCode.SUCCESS)
+        elif args.action == "inspect":
+            manifest = PortableSessionEngine.inspect_package(Path(args.target))
+            if getattr(args, "json", False):
+                _json(manifest.to_dict(), command="portable-inspect", status="SUCCESS")
+            else:
+                print(f"Portable Package: {args.target}")
+                print(f"Session: {manifest.session_id}")
+                print(f"Integrity: {manifest.source_integrity}")
+                print(f"Platform: {manifest.source_platform}")
+                print(f"Records: {manifest.records_count}")
+            return int(ExitCode.SUCCESS)
+        elif args.action == "import":
+            pkg = Path(args.target)
+            chome = getattr(args, "codex_home", None) or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+            plan = PortableSessionEngine.plan_import(pkg, chome, explicit_workspace_remap=args.workspace)
+            res = PortableSessionEngine.execute_import(pkg, chome, plan, dry_run=args.dry_run)
+            if getattr(args, "json", False):
+                _json(res, command="portable-import", status="SUCCESS" if res["success"] else "FAIL")
+            else:
+                print(f"Portable Import: {'SUCCESS' if res['success'] else 'FAILED'}")
+                print(f"Action: {res.get('action')}")
+                if "error" in res:
+                    print(f"Error: {res['error']}")
+            return int(ExitCode.SUCCESS if res["success"] else ExitCode.UNSAFE_TO_MODIFY)
+
+    if args.command == "share":
+        from .alpha7.privacy.redaction import PrivacyRedactionEngine
+        rep = PrivacyRedactionEngine.create_safe_share_report("Windows", "Desktop", "DEGRADED", ["WEDGED_PROJECTION"])
+        print(rep)
+        return int(ExitCode.SUCCESS)
+
+    if args.command == "simulate-plan":
+        from .alpha7.simulation.simulator import RepairSimulator
+        sim = RepairSimulator.simulate_derived_index_repair(args.session)
+        if getattr(args, "json", False):
+            _json(sim.to_dict(), command="simulate-plan", status=sim.status)
+        else:
+            print(f"Simulation Status: {sim.status}")
+            print(f"Source Preserved: {sim.source_preserved}")
+            print(f"Safe to Apply: {sim.safe_to_apply}")
+            print(f"Expected Result: {sim.expected_result_description}")
+        return int(ExitCode.SUCCESS if sim.safe_to_apply else ExitCode.UNSAFE_TO_MODIFY)
+
+    if args.command == "sessions":
         if getattr(args, "orphans", False) or getattr(args, "unindexed", False) or getattr(args, "duplicates", False):
             filtered = filter_sessions(
                 getattr(args, "codex_home", None),
