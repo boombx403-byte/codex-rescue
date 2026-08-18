@@ -84,9 +84,14 @@ class ThreadIdentity:
     parent_session_id: Optional[str] = None
     subagent_ids: List[str] = field(default_factory=list)
 
+    @property
+    def thread_id(self) -> str:
+        return self.session_id
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "session_id": self.session_id,
+            "thread_id": self.session_id,
             "raw_path": self.raw_path,
             "canonical_path": self.canonical_path,
             "namespace": self.namespace.value,

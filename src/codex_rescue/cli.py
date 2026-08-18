@@ -259,8 +259,6 @@ def main(argv: list[str] | None = None) -> int:
     sim_p = subs.add_parser("simulate-plan", help="Simulate recovery plan in temp sandbox")
     sim_p.add_argument("session", type=Path)
     sim_p.add_argument("--codex-home", type=Path)
-    sim_p.add_argument("--json", action="store_true")
-
     args = parser.parse_args(argv)
 
     if args.command is None or args.command == "auto":
@@ -268,9 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         engine = AutopilotEngine(getattr(args, "codex_home", None))
         res = engine.run_autopilot(
             surface=getattr(args, "surface", None),
-            yes=getattr(args, "yes", False),
-            no_prompt=getattr(args, "no_prompt", False),
             repair_safe=getattr(args, "repair_safe", False),
+            no_prompt=getattr(args, "no_prompt", False) or getattr(args, "yes", False),
         )
         if getattr(args, "json", False):
             _json(res.to_dict(), command="auto", status="SUCCESS")
@@ -278,9 +275,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Codex Rescue Alpha7 Autopilot [{res.selected_surface.upper()}]")
             print(f"Topology: {res.topology.os_name} (Detected surfaces: {res.topology.detected_surface_count})")
             print(f"Status: {res.action_taken}")
+            print(f"Discovered sessions: {res.discovered_sessions_count}")
             print(f"Message: {res.message}")
-            if res.simulation:
-                print(f"Simulation: {res.simulation.status} (Source preserved: {res.simulation.source_preserved})")
+            if res.transaction:
+                print(f"Transaction: {res.transaction.status} (Source preserved: {res.transaction.source_preserved})")
         return int(ExitCode.SUCCESS)
 
     if args.command == "self-test":
@@ -343,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "export":
             sess_path = Path(args.target)
             out_zip = args.output or Path(f"{sess_path.stem}.rescue.zip")
-            manifest = PortableSessionEngine.export_session(sess_path, out_zip, workspace_path=args.workspace)
+            manifest = PortableSessionEngine.export_session(sess_path, out_zip)
             if getattr(args, "json", False):
                 _json(manifest.to_dict(), command="portable-export", status="SUCCESS")
             else:
@@ -357,23 +355,24 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"Portable Package: {args.target}")
                 print(f"Session: {manifest.session_id}")
-                print(f"Integrity: {manifest.source_integrity}")
+                print(f"Rollout: {manifest.rollout_filename} ({manifest.rollout_bytes} bytes)")
                 print(f"Platform: {manifest.source_platform}")
-                print(f"Records: {manifest.records_count}")
             return int(ExitCode.SUCCESS)
         elif args.action == "import":
             pkg = Path(args.target)
             chome = getattr(args, "codex_home", None) or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-            plan = PortableSessionEngine.plan_import(pkg, chome, explicit_workspace_remap=args.workspace)
-            res = PortableSessionEngine.execute_import(pkg, chome, plan, dry_run=args.dry_run)
-            if getattr(args, "json", False):
-                _json(res, command="portable-import", status="SUCCESS" if res["success"] else "FAIL")
+            plan = PortableSessionEngine.plan_import(pkg, chome)
+            if getattr(args, "dry_run", False):
+                ok = plan.safe_to_import
             else:
-                print(f"Portable Import: {'SUCCESS' if res['success'] else 'FAILED'}")
-                print(f"Action: {res.get('action')}")
-                if "error" in res:
-                    print(f"Error: {res['error']}")
-            return int(ExitCode.SUCCESS if res["success"] else ExitCode.UNSAFE_TO_MODIFY)
+                ok = PortableSessionEngine.execute_import(pkg, chome)
+            if getattr(args, "json", False):
+                _json({"success": ok, "plan": plan.to_dict()}, command="portable-import", status="SUCCESS" if ok else "FAIL")
+            else:
+                print(f"Portable Import: {'SUCCESS' if ok else 'FAILED'}")
+                if plan.conflict_detected:
+                    print(f"Conflict: {plan.conflict_reason}")
+            return int(ExitCode.SUCCESS if ok else ExitCode.UNSAFE_TO_MODIFY)
 
     if args.command == "share":
         from .alpha7.privacy.redaction import PrivacyRedactionEngine
