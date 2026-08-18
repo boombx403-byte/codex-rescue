@@ -103,11 +103,11 @@ def inspect_schemas(
         try:
             with open(sf, "rb") as f:
                 for _ in range(100):
-                    line = _read_line_bounded(f, MAX_RECORD_BYTES)
-                    if not line:
+                    line_bytes, _, _ = _read_line_bounded(f, MAX_RECORD_BYTES)
+                    if not line_bytes:
                         break
                     try:
-                        record = json.loads(line.decode("utf-8", errors="ignore"))
+                        record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
                     except Exception:
                         continue
 

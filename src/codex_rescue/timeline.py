@@ -65,14 +65,14 @@ def build_timeline(
         with open(path, "rb") as f:
             while event_idx < max_events:
                 line_offset = offset
-                line = _read_line_bounded(f, MAX_RECORD_BYTES)
-                if not line:
+                line_bytes, _, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
+                if not line_bytes:
                     break
-                line_len = len(line)
+                line_len = total_len
                 offset += line_len
 
                 try:
-                    record = json.loads(line.decode("utf-8", errors="ignore"))
+                    record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
                 except Exception:
                     timeline.events.append(
                         TimelineEvent(

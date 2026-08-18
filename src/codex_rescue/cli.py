@@ -34,14 +34,13 @@ HEALTHY_EXPLANATION = (
 
 
 def _json(data: object, command: str = "", status: str = "SUCCESS", session: str | None = None) -> None:
-    env = Envelope(
-        tool_version="0.1.0a6.dev",
-        command=command,
-        status=status,
-        session=session,
-        data=data,
-    )
-    print(json.dumps(env.to_dict(), indent=2, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"schema_version": 1, "data": data}, indent=2, ensure_ascii=False, sort_keys=True))
+
+
+def _doctor(path: Path, oversized_threshold: int = 1_000_000):
+    from .doctor import doctor_session
+
+    return doctor_session(path, oversized_threshold=oversized_threshold)
 
 
 def _resolve_session(session_arg: Path | None, latest: bool, codex_home: Path | None) -> Path | None:
@@ -74,6 +73,29 @@ def _parsed_from_doctor(result: object):
     raise RuntimeError("doctor result does not expose transcript parse result")
 
 
+def _print_doctor(result: object) -> None:
+    data = _to_dict(result)
+    status = str(data.get("status", "UNKNOWN_CORRUPTION"))
+    print(f"Doctor: {status}")
+    session = data.get("session")
+    if session:
+        print(f"Session: {session}")
+    findings = list(data.get("findings") or [])
+    if findings:
+        print(f"Findings: {', '.join(str(item) for item in findings)}")
+    projection = data.get("projection")
+    if isinstance(projection, dict):
+        print(f"Projection: {projection.get('status', 'unknown')} — {projection.get('reason', 'unavailable')}")
+    if status == "HEALTHY":
+        print(f"Note: {HEALTHY_EXPLANATION}")
+    repository = data.get("repository")
+    if isinstance(repository, dict):
+        cwd = repository.get("cwd")
+        head = repository.get("head_sha")
+        if cwd or head:
+            print(f"Repository: {cwd or 'unknown'} (HEAD {head or 'unknown'})")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="codex-rescue", description="Codex Rescue Alpha6 Diagnostic & Recovery Toolkit")
     parser.add_argument("--version", action="version", version=f"codex-rescue {__version__}")
@@ -81,7 +103,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sessions_p = subs.add_parser("sessions", help="List and filter sessions")
     sessions_p.add_argument("--codex-home", type=Path)
-    sessions_p.add_argument("--limit", type=int, default=20)
+    sessions_p.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help=(
+            "bounded listing window after rollout + read-only SQLite inventory correlation (default: 20); "
+            "increase when checking an older known session; limit exhaustion does not prove a rollout is undiscoverable"
+        ),
+    )
     sessions_p.add_argument("--latest", action="store_true")
     sessions_p.add_argument("--orphans", action="store_true", help="Filter orphaned subagent sessions")
     sessions_p.add_argument("--unindexed", action="store_true", help="Filter rollouts unindexed in SQLite state DB")
@@ -248,8 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Error: doctor requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
 
-        from .doctor import doctor_session
-        result = doctor_session(session_path, oversized_threshold=args.oversized_threshold)
+        result = _doctor(session_path, args.oversized_threshold)
         data = _to_dict(result)
         status = str(data.get("status", "UNKNOWN"))
 
@@ -260,13 +289,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             _json(data, command="doctor", status=status, session=str(session_path.stem))
         else:
-            print(f"Doctor: {status}")
-            if data.get("session"):
-                print(f"Session: {data['session']}")
-            findings = list(data.get("findings") or [])
-            if findings:
-                print(f"Findings: {', '.join(str(f) for f in findings)}")
+            _print_doctor(result)
             if args.explain:
+                findings = list(data.get("findings") or [])
                 print("\nFinding Explanations:")
                 for f in findings:
                     exp = get_explanation(str(f))
@@ -274,13 +299,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"What happened: {exp.what_happened}")
                     print(f"Safe action:   {exp.safe_next_action}")
 
-        if status == "HEALTHY":
-            return int(ExitCode.SUCCESS)
-        elif status in ("UNSUPPORTED", "OPAQUE"):
-            return int(ExitCode.INCOMPLETE_OR_UNSUPPORTED)
-        elif status in ("CORRUPT", "UNKNOWN_CORRUPTION", "UNREADABLE"):
-            return int(ExitCode.ACTIONABLE_FINDINGS)
-        return int(ExitCode.WARNINGS_FOUND)
+        return 0
 
     if args.command == "explain":
         exp = get_explanation(args.finding_code)

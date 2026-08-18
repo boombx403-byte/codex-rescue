@@ -179,14 +179,14 @@ def collect_session_evidence(
             with open(path, "rb") as f:
                 lines = 0
                 while lines < max_scan_lines:
-                    line = _read_line_bounded(f, MAX_RECORD_BYTES)
-                    if not line:
+                    line_bytes, _, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
+                    if not line_bytes:
                         break
                     lines += 1
                     evidence.rollout.total_lines += 1
-                    evidence.rollout.total_bytes += len(line)
+                    evidence.rollout.total_bytes += total_len
                     try:
-                        record = json.loads(line.decode("utf-8", errors="ignore"))
+                        record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
                     except Exception:
                         if "MALFORMED_JSONL" not in evidence.findings:
                             evidence.findings.append("MALFORMED_JSONL")
@@ -229,7 +229,7 @@ def collect_session_evidence(
                             "timestamp": ts,
                         })
 
-                    rec_str = line.decode("utf-8", errors="ignore")
+                    rec_str = line_bytes.decode("utf-8", errors="ignore")
                     if "data:image/" in rec_str:
                         evidence.rollout.inline_image_count += 1
                         evidence.rollout.inline_image_bytes += len(rec_str)

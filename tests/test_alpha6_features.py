@@ -119,6 +119,7 @@ def test_graph_and_storage(temp_codex_home):
     parent = temp_codex_home / "sessions" / "parent_session.jsonl"
     parent.write_text(json.dumps({"type": "turn_started", "subagent_id": "child_subagent_1"}) + "\n")
 
+    (temp_codex_home / "sessions" / "subagents").mkdir(parents=True, exist_ok=True)
     child = temp_codex_home / "sessions" / "subagents" / "child_subagent_1.jsonl"
     child.write_text(json.dumps({"type": "turn_started", "parent_session_id": "parent_session"}) + "\n")
 
