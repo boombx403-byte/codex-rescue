@@ -8,8 +8,8 @@ from .alpha5 import Alpha5RolloutDiagnostics, ProjectionReport, scan_rollout_alp
 from .field_evidence import (
     FieldEvidenceReport,
     WorkspacePortabilityReport,
+    analyze_field_evidence,
     inspect_workspace_portability,
-    scan_field_evidence,
 )
 from .gitstate import GitStateError, inspect_git_state
 from .projection import inspect_projection_parity
@@ -36,7 +36,6 @@ SEVERITY = [
     "COMPACTION_STATE_LOSS",
     "REPO_STATE_DIVERGED",
     "INTERRUPTED_INPUT_NOT_DURABLE",
-    "COMPACTION_STORAGE_AMPLIFICATION",
     "WORKSPACE_CONTEXT_MISMATCH",
     "HEALTHY",
 ]
@@ -85,7 +84,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     parsed = parse_transcript(path, oversized_threshold=oversized_threshold)
     schema_compatibility = apply_schema_compatibility(parsed)
     alpha5 = scan_rollout_alpha5(path)
-    field_evidence = scan_field_evidence(path)
+    field_evidence = analyze_field_evidence(parsed)
     projection = inspect_projection_parity(path, parsed)
     findings: set[str] = set()
     if parsed.corruption_class:
@@ -118,8 +117,6 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
 
     if field_evidence.interrupted_input_boundary_count:
         findings.add("INTERRUPTED_INPUT_NOT_DURABLE")
-    if field_evidence.storage_amplification:
-        findings.add("COMPACTION_STORAGE_AMPLIFICATION")
 
     if projection.status == "wedged":
         findings.add("WEDGED_PROJECTION")
