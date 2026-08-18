@@ -61,9 +61,10 @@ class TestArea10PackagingFeatures(unittest.TestCase):
             "typing", "re", "subprocess", "tempfile", "shutil", "stat", "argparse", "ctypes",
             "datetime", "math", "functools", "itertools", "enum", "logging", "errno", "sqlite3", "urllib",
         }
-        allowed = stdlib_names | {"codex_rescue", *{p.stem for p in src_dir.glob("*.py")}}
+        subpackages = {p.name for p in src_dir.iterdir() if p.is_dir()}
+        allowed = stdlib_names | {"codex_rescue", *{p.stem for p in src_dir.rglob("*.py")}, *subpackages}
 
-        for py_file in src_dir.glob("*.py"):
+        for py_file in src_dir.rglob("*.py"):
             tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -75,6 +76,9 @@ class TestArea10PackagingFeatures(unittest.TestCase):
                             f"Non-stdlib import '{top}' found in {py_file.name}",
                         )
                 elif isinstance(node, ast.ImportFrom):
+                    # Relative imports (level > 0) are internal to codex_rescue
+                    if node.level > 0:
+                        continue
                     if node.module:
                         top = node.module.split(".")[0]
                         if not node.module.startswith("."):

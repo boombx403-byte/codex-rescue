@@ -42,6 +42,7 @@ def normalize_canonical_path(p: str | Path) -> str:
     # Strip long path prefix for canonical comparison if drive letter
     if s.startswith("\\\\?\\") and len(s) >= 6 and s[5] == ":":
         s = s[4:]
+    s = s.replace("\\", "/")
     return os.path.normpath(s).replace("\\", "/")
 
 
