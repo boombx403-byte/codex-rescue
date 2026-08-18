@@ -257,28 +257,27 @@ def _read_line_bounded(
     stream: Any,
     max_bytes: int = MAX_RECORD_BYTES,
     digest: Any | None = None,
-) -> tuple[bytes, bool, int, bool]:
+) -> tuple[bytes, bool, int]:
     """Read one JSONL line without allowing an attacker-sized allocation.
 
     ``readline(size)`` caps the initial allocation; an oversized line is then
     drained in fixed chunks so hashing and offsets remain exact.
-    Returns: (line_prefix, is_oversized, total_bytes, has_nul)
     """
 
     limit = max(1, int(max_bytes))
     line = stream.readline(limit + 1)
     if not line:
-        return b"", False, 0, False
+        return b"", False, 0
     if digest is not None:
         digest.update(line)
     total = len(line)
-    has_nul = b"\x00" in line
     if len(line) <= limit:
-        return line, False, total, has_nul
+        return line, False, total
     oversized = True
     if line.endswith(b"\n"):
-        return line, oversized, total, has_nul
+        return line, oversized, total
     ended_with_newline = False
+    has_nul = b"\x00" in line
     while True:
         chunk = stream.readline(64 * 1024)
         if not chunk:
@@ -291,9 +290,11 @@ def _read_line_bounded(
         if chunk.endswith(b"\n"):
             ended_with_newline = True
             break
+    if has_nul and b"\x00" not in line:
+        line = line + b"\x00"
     if ended_with_newline and not line.endswith(b"\n"):
         line = line + b"\n"
-    return line, oversized, total, has_nul
+    return line, oversized, total
 
 
 def parse_transcript(
@@ -322,11 +323,12 @@ def parse_transcript(
     with source.open("rb") as stream:
         while True:
             start = offset
-            line, line_oversized, consumed, has_nul = _read_line_bounded(stream, max_record_bytes, digest)
+            line, line_oversized, consumed = _read_line_bounded(stream, max_record_bytes, digest)
             if not line:
                 break
             offset += consumed
             complete_line = line.endswith(b"\n")
+            has_nul = b"\x00" in line
             if line_oversized:
                 if result.first_invalid_offset is None:
                     result.first_invalid_offset = start
