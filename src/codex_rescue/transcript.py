@@ -142,7 +142,7 @@ _OUTPUT_FAMILIES = {
 # call.
 _KNOWN_OPERATIONAL_TYPES = _CALL_FAMILIES | set(_OUTPUT_FAMILIES) | {"mcp_tool_call_end"}
 _OPERATIONAL_ENVELOPES = {"event_msg", "response_item"}
-MAX_RECORD_BYTES = 8 * 1024 * 1024
+MAX_RECORD_BYTES = 16 * 1024 * 1024
 MAX_RETAINED_FINDINGS = 128
 MAX_CORRELATION_STATES = 1024
 MAX_OCCURRENCES_PER_ID = 2
@@ -276,17 +276,19 @@ def _read_line_bounded(
     oversized = True
     if line.endswith(b"\n"):
         return line, oversized, total
+    ended_with_newline = False
     while True:
         chunk = stream.readline(64 * 1024)
-        if not chunk or chunk.endswith(b"\n"):
-            if chunk:
-                total += len(chunk)
-                if digest is not None:
-                    digest.update(chunk)
+        if not chunk:
             break
         total += len(chunk)
         if digest is not None:
             digest.update(chunk)
+        if chunk.endswith(b"\n"):
+            ended_with_newline = True
+            break
+    if ended_with_newline and not line.endswith(b"\n"):
+        line = line + b"\n"
     return line, oversized, total
 
 
@@ -320,10 +322,22 @@ def parse_transcript(
             if not line:
                 break
             offset += consumed
+            complete_line = line.endswith(b"\n")
+            has_nul = b"\x00" in line
             if line_oversized:
                 if result.first_invalid_offset is None:
                     result.first_invalid_offset = start
                 result.oversized_record_count += 1
+                if has_nul:
+                    record_classification = "MALFORMED"
+                    corruption_class = "MALFORMED_RECORD"
+                elif not complete_line:
+                    record_classification = "TRUNCATED"
+                    corruption_class = "TRUNCATED_TRANSCRIPT"
+                else:
+                    record_classification = "VALID_BUT_OVERSIZED"
+                    corruption_class = "OVERSIZED_PAYLOAD"
+
                 if len(result.oversized_records) < MAX_RETAINED_FINDINGS:
                     result.oversized_records.append(
                         {
@@ -331,22 +345,25 @@ def parse_transcript(
                             "end_offset": offset,
                             "byte_length": consumed,
                             "record_type": "unknown",
-                            "reason": "record exceeds bounded processing limit",
+                            "classification": record_classification,
+                            "reason": (
+                                "record exceeds bounded processing limit (unterminated)"
+                                if not complete_line
+                                else "record exceeds bounded processing limit"
+                            ),
                         }
                     )
-                result.corruption_class = result.corruption_class or "OVERSIZED_PAYLOAD"
+                result.corruption_class = result.corruption_class or corruption_class
                 # The remainder of a bounded line was drained by the helper;
                 # there is no safe payload to parse or retain.
                 invalid_seen = True
                 break
-            has_nul = b"\x00" in line
             if has_nul:
                 if result.first_invalid_offset is None:
                     result.first_invalid_offset = start
                 result.corruption_class = "MALFORMED_RECORD"
                 invalid_seen = True
                 break
-            complete_line = line.endswith(b"\n")
             try:
                 record = json.loads(line)
                 if not isinstance(record, dict):
@@ -460,7 +477,14 @@ def parse_transcript(
             if is_oversized:
                 if len(result.oversized_records) < MAX_RETAINED_FINDINGS:
                     result.oversized_records.append(
-                        {"start_offset": start, "end_offset": offset, "byte_length": len(line), "record_type": kind, "reason": "record/payload exceeds bounded processing threshold"}
+                        {
+                            "start_offset": start,
+                            "end_offset": offset,
+                            "byte_length": len(line),
+                            "record_type": kind,
+                            "classification": "VALID_BUT_OVERSIZED",
+                            "reason": "record/payload exceeds bounded processing threshold",
+                        }
                     )
                 result.oversized_record_count += 1
             if record.get("type") == "compacted":

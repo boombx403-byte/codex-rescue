@@ -110,12 +110,23 @@ def inspect_schemas(
         try:
             with open(sf, "rb") as f:
                 for _ in range(100):
-                    line_bytes, _, _ = _read_line_bounded(f, MAX_RECORD_BYTES)
+                    line_bytes, oversized, _ = _read_line_bounded(f, MAX_RECORD_BYTES)
                     if not line_bytes:
                         break
+                    if oversized:
+                        section_msg = f"Session {sf.name} contains oversized record(s) exceeding bounded reader limit ({MAX_RECORD_BYTES} bytes)"
+                        if section_msg not in report.opaque_or_unsupported_sections:
+                            report.opaque_or_unsupported_sections.append(section_msg)
+                        warn_msg = f"Oversized record encountered in {sf.name}; schema inspection is bounded"
+                        if warn_msg not in report.compatibility_warnings:
+                            report.compatibility_warnings.append(warn_msg)
+                        continue
                     try:
                         record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
                     except Exception:
+                        warn_msg = f"Malformed/unparseable JSON record encountered in {sf.name}"
+                        if warn_msg not in report.compatibility_warnings:
+                            report.compatibility_warnings.append(warn_msg)
                         continue
 
                     rtype = record.get("type") or record.get("event")
@@ -143,10 +154,11 @@ def inspect_schemas(
     if total_kinds > 0:
         report.schema_coverage_pct = round((len(recognized) / total_kinds) * 100, 1)
 
-    if unknown:
+    if unknown or report.opaque_or_unsupported_sections:
         report.status = "PARTIALLY_UNSUPPORTED"
-        report.compatibility_warnings.append(
-            f"Detected {len(unknown)} unmodeled record kind(s): {', '.join(sorted(unknown))}. Treat diagnostics as incomplete."
-        )
+        if unknown:
+            report.compatibility_warnings.append(
+                f"Detected {len(unknown)} unmodeled record kind(s): {', '.join(sorted(unknown))}. Treat diagnostics as incomplete."
+            )
 
     return report

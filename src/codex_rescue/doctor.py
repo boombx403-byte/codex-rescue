@@ -24,6 +24,7 @@ SEVERITY = [
     "MALFORMED_RECORD",
     "TRUNCATED_TRANSCRIPT",
     "OVERSIZED_PAYLOAD",
+    "VALID_BUT_OVERSIZED",
     "INTERLEAVED_WRITERS",
     "INVALID_PERSISTED_ITEM_ID",
     "UNKNOWN_OPERATIONAL_SCHEMA",
@@ -95,8 +96,21 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     findings: set[str] = set()
     if parsed.corruption_class:
         findings.add(parsed.corruption_class)
-    if parsed.oversized_records:
+    if parsed.oversized_records or parsed.oversized_record_count > 0:
         findings.add("OVERSIZED_PAYLOAD")
+        for rec in parsed.oversized_records:
+            cls_name = rec.get("classification")
+            if cls_name == "VALID_BUT_OVERSIZED":
+                findings.add("VALID_BUT_OVERSIZED")
+            elif cls_name == "MALFORMED":
+                findings.add("MALFORMED_RECORD")
+            elif cls_name == "TRUNCATED":
+                findings.add("TRUNCATED_TRANSCRIPT")
+    if alpha5.bounded_record_overflow_count > 0:
+        findings.add("OVERSIZED_PAYLOAD")
+        findings.add("VALID_BUT_OVERSIZED")
+    if parsed.first_invalid_offset is not None and not parsed.corruption_class:
+        findings.add("UNKNOWN_CORRUPTION")
     if parsed.operational_schema_issues or parsed.correlation_ambiguities:
         findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
     if parsed.ordinal_mode not in {None, "legacy", "paginated"}:
@@ -116,7 +130,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         findings.add("INTERLEAVED_WRITERS")
     if alpha5.source_changed_during_scan:
         findings.add("ACTIVE_WRITE_UNCERTAIN")
-    if alpha5.empty_rollout or alpha5.header_only_rollout:
+    if alpha5.empty_rollout or alpha5.header_only_rollout or (parsed.valid_record_count == 0 and parsed.source_size > 0):
         findings.add("INCOMPLETE_ROLLOUT")
     if alpha5.malformed_opaque_field_count:
         findings.add("UNKNOWN_OPERATIONAL_SCHEMA")

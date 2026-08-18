@@ -65,11 +65,45 @@ def build_timeline(
         with open(path, "rb") as f:
             while event_idx < max_events:
                 line_offset = offset
-                line_bytes, _, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
+                line_bytes, oversized, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
                 if not line_bytes:
                     break
                 line_len = total_len
                 offset += line_len
+                complete_line = line_bytes.endswith(b"\n")
+                has_nul = b"\x00" in line_bytes
+
+                if oversized:
+                    classification = "VALID_BUT_OVERSIZED" if (complete_line and not has_nul) else ("TRUNCATED" if not complete_line else "MALFORMED")
+                    timeline.events.append(
+                        TimelineEvent(
+                            index=event_idx,
+                            event_type="oversized_record_boundary",
+                            observed=True,
+                            byte_offset=line_offset,
+                            record_size=line_len,
+                            details={
+                                "classification": classification,
+                                "reason": "record exceeds bounded processing limit",
+                            },
+                        )
+                    )
+                    event_idx += 1
+                    continue
+
+                if has_nul:
+                    timeline.events.append(
+                        TimelineEvent(
+                            index=event_idx,
+                            event_type="malformed_record_boundary",
+                            observed=True,
+                            byte_offset=line_offset,
+                            record_size=line_len,
+                            details={"error": "embedded_nul_byte"},
+                        )
+                    )
+                    event_idx += 1
+                    continue
 
                 try:
                     record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
@@ -77,7 +111,7 @@ def build_timeline(
                     timeline.events.append(
                         TimelineEvent(
                             index=event_idx,
-                            event_type="malformed_record_boundary",
+                            event_type="truncated_record_boundary" if not complete_line else "malformed_record_boundary",
                             observed=True,
                             byte_offset=line_offset,
                             record_size=line_len,
