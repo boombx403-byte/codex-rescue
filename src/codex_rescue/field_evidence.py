@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-from .transcript import MAX_RECORD_BYTES, _read_line_bounded
+from .transcript import ParseResult, TranscriptEvent
 
 
 MAX_FIELD_EVIDENCE = 32
-_STORAGE_AMPLIFICATION_MIN_BYTES = 128 * 1024 * 1024
-_STORAGE_AMPLIFICATION_MIN_RATIO = 0.50
-_OUTER_TYPE_PREFIX_RE = re.compile(br'"type"\s*:\s*"([^"\\]+)"')
 _WSL_MNT_RE = re.compile(r"^/mnt/([A-Za-z])(?:/(.*))?$")
 _WINDOWS_DRIVE_RE = re.compile(r"^([A-Za-z]):[\\/](.*)$")
 
@@ -43,28 +38,16 @@ class WorkspacePortabilityReport:
 
 @dataclass
 class FieldEvidenceReport:
-    source_bytes: int = 0
-    classified_record_bytes: int = 0
-    unclassified_oversized_bytes: int = 0
-    compaction_record_count: int = 0
-    compaction_physical_bytes: int = 0
-    compaction_byte_ratio: float = 0.0
-    storage_amplification: bool = False
-    storage_statement: str = "No strong persisted storage-amplification signal observed"
+    retained_event_count: int = 0
+    retained_event_bytes: int = 0
     interrupted_input_boundary_count: int = 0
     interrupted_input_boundaries: list[dict[str, Any]] = field(default_factory=list)
-    interrupted_input_statement: str = "No conservative interrupted-input persistence gap observed"
+    interrupted_input_statement: str = "No conservative interrupted-input persistence gap observed in the retained event window"
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "source_bytes": self.source_bytes,
-            "classified_record_bytes": self.classified_record_bytes,
-            "unclassified_oversized_bytes": self.unclassified_oversized_bytes,
-            "compaction_record_count": self.compaction_record_count,
-            "compaction_physical_bytes": self.compaction_physical_bytes,
-            "compaction_byte_ratio": self.compaction_byte_ratio,
-            "storage_amplification": self.storage_amplification,
-            "storage_statement": self.storage_statement,
+            "retained_event_count": self.retained_event_count,
+            "retained_event_bytes": self.retained_event_bytes,
             "interrupted_input_boundary_count": self.interrupted_input_boundary_count,
             "interrupted_input_boundaries": self.interrupted_input_boundaries,
             "interrupted_input_statement": self.interrupted_input_statement,
@@ -143,146 +126,90 @@ def inspect_workspace_portability(cwd: object) -> WorkspacePortabilityReport:
     )
 
 
-def _record_outer_type_from_prefix(line: bytes) -> str | None:
-    match = _OUTER_TYPE_PREFIX_RE.search(line[:4096])
-    if match is None:
-        return None
-    try:
-        return match.group(1).decode("utf-8")
-    except UnicodeDecodeError:
-        return None
+def _outer_type(event: TranscriptEvent) -> str:
+    return str(event.type or "unknown")
 
 
-def scan_field_evidence(
-    path: str | Path,
-    *,
-    max_record_bytes: int = MAX_RECORD_BYTES,
-) -> FieldEvidenceReport:
-    """Collect bounded field-driven evidence without retaining transcript content.
+def analyze_field_evidence(parsed: ParseResult) -> FieldEvidenceReport:
+    """Analyze already-retained bounded events; never re-scan the rollout.
 
-    The scanner is deliberately conservative.  It reports physical compaction
-    dominance and interrupted turn boundaries, but it never claims to recreate a
-    prompt that was not durably persisted and never treats storage amplification
-    as proof of transcript corruption.
+    This deliberately avoids a third sequential pass over multi-gigabyte field
+    rollouts.  The interrupted-input check is therefore scoped to the parser's
+    bounded retained event window.  It never claims to reconstruct prompt text
+    that was not durably persisted.
     """
 
-    source = Path(path).expanduser().resolve()
-    result = FieldEvidenceReport(source_bytes=source.stat().st_size)
-    offset = 0
+    result = FieldEvidenceReport(
+        retained_event_count=len(parsed.events),
+        retained_event_bytes=parsed.retained_event_bytes,
+    )
     turn_start_offset: int | None = None
     turn_context_seen = False
     durable_user_input_seen = False
 
-    with source.open("rb") as stream:
-        while True:
-            start = offset
-            line, oversized, consumed = _read_line_bounded(
-                stream, max_bytes=max_record_bytes, digest=None
-            )
-            if not line:
-                break
-            offset += consumed
+    for event in parsed.events:
+        outer_type = _outer_type(event)
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        payload_type = str(payload.get("type") or "").lower()
 
-            record: dict[str, Any] | None = None
-            outer_type: str | None = None
-            payload: dict[str, Any] = {}
-            if oversized:
-                outer_type = _record_outer_type_from_prefix(line)
-                if outer_type is None:
-                    result.unclassified_oversized_bytes += consumed
-            else:
-                try:
-                    decoded = json.loads(line)
-                except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                    decoded = None
-                if isinstance(decoded, dict):
-                    record = decoded
-                    outer_type = str(record.get("type") or "unknown")
-                    raw_payload = record.get("payload")
-                    if isinstance(raw_payload, dict):
-                        payload = raw_payload
+        if outer_type == "event_msg" and payload_type == "task_started":
+            turn_start_offset = event.offset
+            turn_context_seen = False
+            durable_user_input_seen = False
+            continue
 
-            if outer_type is not None:
-                result.classified_record_bytes += consumed
-            if outer_type == "compacted":
-                result.compaction_record_count += 1
-                result.compaction_physical_bytes += consumed
+        if turn_start_offset is None:
+            continue
 
-            if record is None:
-                continue
+        if outer_type == "turn_context":
+            turn_context_seen = True
 
-            payload_type = str(payload.get("type") or "").lower()
-            if outer_type == "event_msg" and payload_type == "task_started":
-                turn_start_offset = start
-                turn_context_seen = False
-                durable_user_input_seen = False
-                continue
+        # event_msg/user_message is the strongest durable marker for the
+        # submitted prompt.  A post-turn_context response_item user message is
+        # accepted as a compatibility fallback. Earlier role=user records may
+        # be injected context and therefore do not suppress a finding alone.
+        if outer_type == "event_msg" and payload_type == "user_message":
+            durable_user_input_seen = True
+        elif (
+            outer_type == "response_item"
+            and payload_type == "message"
+            and str(payload.get("role") or "").lower() == "user"
+            and turn_context_seen
+        ):
+            durable_user_input_seen = True
 
-            if turn_start_offset is None:
-                continue
+        if outer_type == "event_msg" and payload_type in {
+            "turn_aborted",
+            "turn_interrupted",
+        }:
+            if not durable_user_input_seen:
+                result.interrupted_input_boundary_count += 1
+                if len(result.interrupted_input_boundaries) < MAX_FIELD_EVIDENCE:
+                    result.interrupted_input_boundaries.append(
+                        {
+                            "task_started_offset": turn_start_offset,
+                            "terminal_offset": event.offset,
+                            "terminal_type": payload_type,
+                            "reason": "turn ended before a conservative durable submitted-user-input marker was observed",
+                        }
+                    )
+            turn_start_offset = None
+            turn_context_seen = False
+            durable_user_input_seen = False
+        elif outer_type == "event_msg" and payload_type in {
+            "task_complete",
+            "task_completed",
+            "turn_complete",
+            "turn_completed",
+            "turn_failed",
+        }:
+            turn_start_offset = None
+            turn_context_seen = False
+            durable_user_input_seen = False
 
-            if outer_type == "turn_context":
-                turn_context_seen = True
-
-            # event_msg/user_message is the strongest durable marker for the
-            # submitted prompt.  A post-turn_context response_item user message
-            # is accepted as a compatibility fallback.  Earlier role=user
-            # records may be injected context and therefore do not suppress a
-            # finding by themselves.
-            if outer_type == "event_msg" and payload_type == "user_message":
-                durable_user_input_seen = True
-            elif (
-                outer_type == "response_item"
-                and payload_type == "message"
-                and str(payload.get("role") or "").lower() == "user"
-                and turn_context_seen
-            ):
-                durable_user_input_seen = True
-
-            if outer_type == "event_msg" and payload_type in {
-                "turn_aborted",
-                "turn_interrupted",
-            }:
-                if not durable_user_input_seen:
-                    result.interrupted_input_boundary_count += 1
-                    if len(result.interrupted_input_boundaries) < MAX_FIELD_EVIDENCE:
-                        result.interrupted_input_boundaries.append(
-                            {
-                                "task_started_offset": turn_start_offset,
-                                "terminal_offset": start,
-                                "terminal_type": payload_type,
-                                "reason": "turn ended before a conservative durable submitted-user-input marker was observed",
-                            }
-                        )
-                turn_start_offset = None
-                turn_context_seen = False
-                durable_user_input_seen = False
-            elif outer_type == "event_msg" and payload_type in {
-                "task_complete",
-                "task_completed",
-                "turn_complete",
-                "turn_completed",
-                "turn_failed",
-            }:
-                turn_start_offset = None
-                turn_context_seen = False
-                durable_user_input_seen = False
-
-    if result.source_bytes:
-        result.compaction_byte_ratio = result.compaction_physical_bytes / result.source_bytes
-    if (
-        result.source_bytes >= _STORAGE_AMPLIFICATION_MIN_BYTES
-        and result.compaction_physical_bytes >= _STORAGE_AMPLIFICATION_MIN_BYTES
-        and result.compaction_byte_ratio >= _STORAGE_AMPLIFICATION_MIN_RATIO
-    ):
-        result.storage_amplification = True
-        result.storage_statement = (
-            "Compacted records dominate a large persisted rollout; this is storage-amplification evidence, "
-            "not by itself transcript-corruption evidence"
-        )
     if result.interrupted_input_boundary_count:
         result.interrupted_input_statement = (
-            "At least one persisted turn ended before a conservative durable submitted-user-input marker; "
+            "At least one retained turn ended before a conservative durable submitted-user-input marker; "
             "missing prompt text cannot be reconstructed from absent rollout data"
         )
     return result
@@ -291,6 +218,6 @@ def scan_field_evidence(
 __all__ = [
     "FieldEvidenceReport",
     "WorkspacePortabilityReport",
+    "analyze_field_evidence",
     "inspect_workspace_portability",
-    "scan_field_evidence",
 ]
