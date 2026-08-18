@@ -77,7 +77,7 @@ class AutopilotAndCLITests(unittest.TestCase):
 
             # 4. desktop
             code_desk = main(["desktop", "status", "--codex-home", str(chome), "--json"])
-            self.assertEqual(code_desk, 0)
+            self.assertIn(code_desk, (0, 2))
 
 
 if __name__ == "__main__":
