@@ -5,10 +5,10 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 
 const targets = {
-  'linux-x64': ['codex-rescue-linux-x64', 'codex-rescue'],
-  'win32-x64': ['codex-rescue-win32-x64', 'codex-rescue.exe'],
-  'darwin-arm64': ['codex-rescue-darwin-arm64', 'codex-rescue'],
-  'darwin-x64': ['codex-rescue-darwin-x64', 'codex-rescue'],
+  'linux-x64': [['codex-rescue-linux-x64'], 'codex-rescue'],
+  'win32-x64': [['codex-rescue-windows-x64', 'codex-rescue-win32-x64'], 'codex-rescue.exe'],
+  'darwin-arm64': [['codex-rescue-darwin-arm64'], 'codex-rescue'],
+  'darwin-x64': [['codex-rescue-darwin-x64'], 'codex-rescue'],
 };
 
 const key = `${process.platform}-${process.arch}`;
@@ -18,14 +18,19 @@ if (!target) {
   process.exit(1);
 }
 
-const [packageName, executableName] = target;
+const [packageCandidates, executableName] = target;
 let packageJson;
-try {
-  packageJson = require.resolve(`${packageName}/package.json`);
-} catch (error) {
+for (const p of packageCandidates) {
+  try {
+    packageJson = require.resolve(`${p}/package.json`);
+    break;
+  } catch {}
+}
+
+if (!packageJson) {
   console.error(
-    `codex-rescue: platform package ${packageName} is not installed. ` +
-    'This Alpha5 prerelease expects npm to install the matching optional dependency.'
+    `codex-rescue: platform package (${packageCandidates.join(' or ')}) is not installed. ` +
+    'This release expects npm to install the matching optional dependency.'
   );
   process.exit(1);
 }

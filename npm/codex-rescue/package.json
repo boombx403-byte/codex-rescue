@@ -1,6 +1,6 @@
 {
   "name": "codex-rescue",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.6-2",
   "description": "Read-only-first diagnostics and recovery tooling for OpenAI Codex local sessions",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,8 @@
   },
   "optionalDependencies": {
     "codex-rescue-linux-x64": "0.1.0-alpha.6",
-    "codex-rescue-win32-x64": "0.1.0-alpha.6",
+    "codex-rescue-windows-x64": ">=0.1.0-alpha.6",
+    "codex-rescue-win32-x64": ">=0.1.0-alpha.6",
     "codex-rescue-darwin-arm64": "0.1.0-alpha.6",
     "codex-rescue-darwin-x64": "0.1.0-alpha.6"
   }
