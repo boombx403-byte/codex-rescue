@@ -17,7 +17,7 @@ All notable changes to Codex Rescue are documented here.
 - Conservative `INTERRUPTED_INPUT_NOT_DURABLE` evidence for a retained `task_started` → abort/interruption boundary with no durable submitted-user marker; Rescue explicitly does not recreate prompt text that was never persisted.
 - Explicit workspace-portability evidence for WSL `/mnt/<drive>` versus Windows-native drive paths, including `WORKSPACE_CONTEXT_MISMATCH` only when the persisted path family conflicts with the runtime and the saved repository cwd is inaccessible.
 - Read-only rollout-migration consistency diagnostics: `SUBAGENT_HISTORY_BOUNDARY_SUSPECT` for the exact zero-based paginated EOF-boundary shape reported in migrated subagents, and `THREAD_NAME_METADATA_DIVERGED` when a legacy `session_index.jsonl` name survives while paginated SQLite metadata has no name.
-- Privacy-bounded name-divergence evidence stores only name presence, length, and SHA256; raw thread names are not emitted by the diagnostic report.
+- Privacy-bounded name-divergence evidence stores only name presence and length; raw thread names and name digests are not emitted by the diagnostic report.
 - Format-only opaque-content classification for recognized legacy opaque envelopes, the reported foreign `ocx1:` marker, unknown opaque values, and malformed fields; no decryption or account-key diagnosis.
 - Zero-byte/header-only and changed-during-scan diagnostics.
 - Bounded large-rollout aggregates for physical record size, bounded overflows, inline-media indicators, and compaction counts without base64 decoding.
