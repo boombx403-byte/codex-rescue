@@ -164,7 +164,7 @@ def collect_session_evidence(
 
     evidence = SessionEvidence(
         session_id=session_id,
-        session_path=sanitize_path(path),
+        session_path=str(path),
         is_archived=is_archived,
         mtime=mtime,
         size_bytes=size_bytes,
@@ -178,7 +178,7 @@ def collect_session_evidence(
     for lc in lock_candidates:
         if lc.exists():
             evidence.writer.lock_present = True
-            evidence.writer.lock_path = sanitize_path(lc)
+            evidence.writer.lock_path = str(lc)
             try:
                 lstat = lc.stat()
                 evidence.writer.lock_age_seconds = round(time.time() - lstat.st_mtime, 2)
@@ -324,7 +324,7 @@ def collect_session_evidence(
     for db in db_candidates:
         if db.exists():
             evidence.sqlite.present = True
-            evidence.sqlite.db_path = sanitize_path(db)
+            evidence.sqlite.db_path = str(db)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
                 try:
