@@ -26,7 +26,7 @@
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 Run instantly without installation (zero Python setup required):
 
@@ -57,7 +57,7 @@ codex-rescue --help
 
 ---
 
-## 🧭 What Codex Rescue Does
+## What Codex Rescue Does
 
 Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates SQLite index / projection layers, diagnoses persistence hazards, and creates reproducible recovery forks **without ever mutating source session data in place**.
 
@@ -82,7 +82,7 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
 
 ---
 
-## 🛠️ Feature Matrix & Commands
+## Feature Matrix & Commands
 
 | Command | Purpose | Description |
 |---|---|---|
@@ -105,7 +105,7 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
 
 ---
 
-## 🛡️ Core Reliability & Safety Hardening
+## Core Reliability & Safety Hardening
 
 ### 1. Oversized Record Handling (>16 MiB)
 * Bounded chunk streaming reader prevents memory exhaustion.
@@ -130,7 +130,7 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
 
 ---
 
-## 📖 Command Examples
+## Command Examples
 
 ### 1. Run Doctor on Sessions
 ```bash
@@ -186,7 +186,7 @@ codex-rescue report --latest -o report.html
 
 ---
 
-## 📦 Distribution Channels
+## Distribution Channels
 
 | Channel | Identifier | Status | Install Command |
 |---|---|---|---|
@@ -197,7 +197,7 @@ codex-rescue report --latest -o report.html
 
 ---
 
-## 🔒 Privacy & Local-First Philosophy
+## Privacy & Local-First Philosophy
 
 Codex rollouts and SQLite stores may contain private prompts, proprietary source code, secrets, API tokens, and local file paths.
 
@@ -207,7 +207,7 @@ Codex rollouts and SQLite stores may contain private prompts, proprietary source
 
 ---
 
-## 🧪 Development & Quality Assurance
+## Development & Quality Assurance
 
 Run the test suite across all feature tiers:
 
@@ -233,6 +233,6 @@ node --test npm/tests/*.test.cjs
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the [MIT License](LICENSE). Copyright (c) 2026 shleder.
