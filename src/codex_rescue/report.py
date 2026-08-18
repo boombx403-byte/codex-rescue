@@ -90,22 +90,22 @@ th {{ background: #f6f8fa; }}
 <div class="container">
     <h1>Codex Rescue Diagnostic Report</h1>
     <p>Session ID: <code>{h_session}</code> | Status: <span class="badge badge-{'healthy' if ev.status == 'HEALTHY' else 'warning'}">{h_status}</span> | Confidence: <strong>{h_confidence}</strong></p>
-    
+
     <h2>1. Diagnostic Findings</h2>
     {findings_html}
-    
+
     <h2>2. Persisted State Layer Diff</h2>
     {diff_html}
-    
+
     <h2>3. Forensic Event Timeline (First 30 Events)</h2>
     <table>
         <thead><tr><th>#</th><th>Event Kind</th><th>Ordinal</th><th>Timestamp</th><th>Size</th></tr></thead>
         <tbody>{events_html}</tbody>
     </table>
-    
+
     <h2>4. Session Family Hierarchy</h2>
     <pre>{html.escape(graph.render_text())}</pre>
-    
+
     <h2>5. Recovery Plan</h2>
     <div class="card">
         <p><strong>Applicable:</strong> {'YES' if plan.is_applicable else 'NO'}</p>
@@ -113,7 +113,7 @@ th {{ background: #f6f8fa; }}
         <p><strong>Source Mutated:</strong> {'YES' if plan.source_files_modified else 'NO (SOURCE UNTOUCHED)'}</p>
         {f"<p><strong>Refusal Reason:</strong> {html.escape(plan.refusal_reason)}</p>" if plan.refusal_reason else ""}
     </div>
-    
+
     <h2>6. Privacy & Redaction Audit</h2>
     <p>{'✅ Clean: No secrets, credentials, or private payload leakage detected.' if not violations else f'⚠️ Redaction Violations: {html.escape(str(violations))}'}</p>
 </div>

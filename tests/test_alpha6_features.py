@@ -68,7 +68,7 @@ def test_redact_and_privacy_audit():
 def test_batch_doctor_all_and_changed(temp_codex_home):
     s1 = temp_codex_home / "sessions" / "session_1.jsonl"
     s1.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n" + json.dumps({"type": "task_complete", "ordinal": 2}) + "\n")
-    
+
     s2 = temp_codex_home / "archived_sessions" / "session_2.jsonl"
     s2.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n")
 
@@ -147,7 +147,7 @@ def test_schema_and_workspace(temp_codex_home):
 def test_writer_inspector_and_read_only(temp_codex_home):
     s_path = temp_codex_home / "sessions" / "writer_test.jsonl"
     s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n")
-    
+
     lock_path = temp_codex_home / "sessions" / "writer_test.lock"
     lock_path.write_text(str(os.getpid()))
 
