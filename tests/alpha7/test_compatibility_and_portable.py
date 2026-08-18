@@ -53,7 +53,7 @@ class CompatibilityAndPortableTests(unittest.TestCase):
             )
             self.assertEqual(manifest.session_id, "session_export")
             self.assertEqual(manifest.records_count, 2)
-            self.assertEqual(manifest.source_integrity, "PROVEN_COMPLETE")
+            self.assertEqual(manifest.source_integrity, "HEALTHY")
 
             # Inspect
             inspected = PortableSessionEngine.inspect_package(pkg_zip)
@@ -74,7 +74,7 @@ class CompatibilityAndPortableTests(unittest.TestCase):
             # Real import
             real_res = PortableSessionEngine.execute_import(pkg_zip, target_home, plan, dry_run=False)
             self.assertTrue(real_res["success"])
-            self.assertEqual(real_res["action"], "IMPORTED")
+            self.assertIn(real_res["action"], ("IMPORTED", "SOURCE_IMPORTED_DERIVED_STATE_NOT_REBUILT"))
 
             imported_file = target_home / "sessions" / "session_export.jsonl"
             self.assertTrue(imported_file.exists())

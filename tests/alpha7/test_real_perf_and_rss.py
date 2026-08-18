@@ -5,11 +5,15 @@ import os
 import platform
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 
+from codex_rescue.alpha7.compatibility.portable import PortableSessionEngine
+from codex_rescue.alpha7.recovery.backup import BackupEngine
 from codex_rescue.alpha7.recovery.salvage_stream import StreamSalvageEngine
+from codex_rescue.alpha7.simulation.transaction import compute_file_sha256
 
 
 def get_current_rss_mb() -> float:
@@ -68,6 +72,46 @@ def get_current_rss_mb() -> float:
     return 0.0
 
 
+class RSSSampler:
+    """Samples process RSS every 5-10ms during execution to capture true peak memory."""
+
+    def __init__(self, interval_sec: float = 0.005):
+        self.interval = interval_sec
+        self._running = False
+        self.baseline_mb = 0.0
+        self.peak_mb = 0.0
+        self.final_mb = 0.0
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self.baseline_mb = get_current_rss_mb()
+        self.peak_mb = self.baseline_mb
+        self._running = True
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True, name="RSSMonitor")
+        self._thread.start()
+
+    def _sample_loop(self) -> None:
+        while self._running:
+            cur = get_current_rss_mb()
+            if cur > self.peak_mb:
+                self.peak_mb = cur
+            time.sleep(self.interval)
+
+    def stop(self) -> dict:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.2)
+        self.final_mb = get_current_rss_mb()
+        if self.final_mb > self.peak_mb:
+            self.peak_mb = self.final_mb
+        return {
+            "baseline_mb": self.baseline_mb,
+            "peak_mb": self.peak_mb,
+            "final_mb": self.final_mb,
+            "peak_delta_mb": max(0.0, self.peak_mb - self.baseline_mb),
+        }
+
+
 class RealPerfAndRSSTests(unittest.TestCase):
     def test_10mb_streaming_rss_measured(self):
         with tempfile.TemporaryDirectory() as td:
@@ -80,17 +124,18 @@ class RealPerfAndRSSTests(unittest.TestCase):
                     out.write(line)
                     written += len(line)
 
-            rss_before = get_current_rss_mb()
+            sampler = RSSSampler()
+            sampler.start()
             t0 = time.perf_counter()
             engine = StreamSalvageEngine()
             res = engine.scan_file(f)
             t1 = time.perf_counter()
-            rss_after = get_current_rss_mb()
+            mem = sampler.stop()
 
             elapsed = t1 - t0
             self.assertEqual(res.source_status, "HEALTHY")
             self.assertEqual(res.unclassified_bytes, 0)
-            print(f"\n[BENCH 10MB] Exact Bytes: {written}, Time: {elapsed:.3f}s, RSS Before: {rss_before:.1f}MB, RSS After: {rss_after:.1f}MB, Records: {res.valid_records_count}")
+            print(f"\n[BENCH 10MB] Bytes: {written}, Time: {elapsed:.3f}s, Baseline: {mem['baseline_mb']:.1f}MB, Peak: {mem['peak_mb']:.1f}MB, Final: {mem['final_mb']:.1f}MB, Records: {res.valid_records_count}")
 
     def test_100mb_streaming_rss_measured(self):
         with tempfile.TemporaryDirectory() as td:
@@ -103,20 +148,20 @@ class RealPerfAndRSSTests(unittest.TestCase):
                     out.write(line)
                     written += len(line)
 
-            rss_before = get_current_rss_mb()
+            sampler = RSSSampler()
+            sampler.start()
             t0 = time.perf_counter()
             engine = StreamSalvageEngine()
             res = engine.scan_file(f)
             t1 = time.perf_counter()
-            rss_after = get_current_rss_mb()
+            mem = sampler.stop()
 
             elapsed = t1 - t0
             self.assertEqual(res.source_status, "HEALTHY")
             self.assertEqual(res.unclassified_bytes, 0)
-            print(f"[BENCH 100MB] Exact Bytes: {written}, Time: {elapsed:.3f}s, RSS Before: {rss_before:.1f}MB, RSS After: {rss_after:.1f}MB, Records: {res.valid_records_count}")
-            if rss_before > 0 and rss_after > 0:
-                diff = abs(rss_after - rss_before)
-                self.assertLess(diff, 50.0, "Memory growth exceeds bounded streaming gate!")
+            print(f"[BENCH 100MB] Bytes: {written}, Time: {elapsed:.3f}s, Baseline: {mem['baseline_mb']:.1f}MB, Peak: {mem['peak_mb']:.1f}MB, Final: {mem['final_mb']:.1f}MB, Records: {res.valid_records_count}")
+            if mem["baseline_mb"] > 0:
+                self.assertLess(mem["peak_delta_mb"], 50.0, "Sampled peak memory exceeds bounded streaming gate on 100MB!")
 
     def test_500mb_streaming_rss_measured(self):
         with tempfile.TemporaryDirectory() as td:
@@ -129,20 +174,20 @@ class RealPerfAndRSSTests(unittest.TestCase):
                     out.write(line)
                     written += len(line)
 
-            rss_before = get_current_rss_mb()
+            sampler = RSSSampler()
+            sampler.start()
             t0 = time.perf_counter()
             engine = StreamSalvageEngine()
             res = engine.scan_file(f)
             t1 = time.perf_counter()
-            rss_after = get_current_rss_mb()
+            mem = sampler.stop()
 
             elapsed = t1 - t0
             self.assertEqual(res.source_status, "HEALTHY")
             self.assertEqual(res.unclassified_bytes, 0)
-            print(f"[BENCH 500MB] Exact Bytes: {written}, Time: {elapsed:.3f}s, RSS Before: {rss_before:.1f}MB, RSS After: {rss_after:.1f}MB, Records: {res.valid_records_count}")
-            if rss_before > 0 and rss_after > 0:
-                diff = abs(rss_after - rss_before)
-                self.assertLess(diff, 50.0, "Memory growth exceeds bounded streaming gate on 500MB!")
+            print(f"[BENCH 500MB] Bytes: {written}, Time: {elapsed:.3f}s, Baseline: {mem['baseline_mb']:.1f}MB, Peak: {mem['peak_mb']:.1f}MB, Final: {mem['final_mb']:.1f}MB, Records: {res.valid_records_count}")
+            if mem["baseline_mb"] > 0:
+                self.assertLess(mem["peak_delta_mb"], 50.0, "Sampled peak memory exceeds bounded streaming gate on 500MB!")
 
     def test_1gb_streaming_volume_measured(self):
         """Simulates 1GB+ stream scan using chunked stream generator to verify bounded memory."""
@@ -173,20 +218,46 @@ class RealPerfAndRSSTests(unittest.TestCase):
 
         stream = io.BufferedReader(Chunked1GBStream(total_bytes, chunk))
 
-        rss_before = get_current_rss_mb()
+        sampler = RSSSampler()
+        sampler.start()
         t0 = time.perf_counter()
         engine = StreamSalvageEngine()
         res = engine.scan_stream(stream, total_size=total_bytes)
         t1 = time.perf_counter()
-        rss_after = get_current_rss_mb()
+        mem = sampler.stop()
 
         elapsed = t1 - t0
         self.assertEqual(res.source_status, "HEALTHY")
         self.assertEqual(res.valid_records_count, total_records)
-        print(f"[BENCH 1GB] Exact Bytes: {total_bytes}, Time: {elapsed:.3f}s, RSS Before: {rss_before:.1f}MB, RSS After: {rss_after:.1f}MB, Records: {res.valid_records_count}")
-        if rss_before > 0 and rss_after > 0:
-            diff = abs(rss_after - rss_before)
-            self.assertLess(diff, 50.0, "Memory growth exceeds bounded streaming gate on 1GB!")
+        print(f"[BENCH 1GB STREAM] Bytes: {total_bytes}, Time: {elapsed:.3f}s, Baseline: {mem['baseline_mb']:.1f}MB, Peak: {mem['peak_mb']:.1f}MB, Final: {mem['final_mb']:.1f}MB, Records: {res.valid_records_count}")
+        if mem["baseline_mb"] > 0:
+            self.assertLess(mem["peak_delta_mb"], 50.0, "Sampled peak memory exceeds bounded streaming gate on 1GB!")
+
+    def test_500mb_backup_streaming_bounded_memory(self):
+        """Verifies that BackupEngine copies 500MB without materializing file in memory."""
+        with tempfile.TemporaryDirectory() as td:
+            src_file = Path(td) / "large_rollout.jsonl"
+            line = '{"turn": 1, "data": "' + ("E" * 16384) + '"}\n'
+            target_bytes = 500 * 1024 * 1024
+            written = 0
+            with open(src_file, "w", encoding="utf-8") as out:
+                while written < target_bytes:
+                    out.write(line)
+                    written += len(line)
+
+            b_engine = BackupEngine(Path(td) / "backups")
+            sampler = RSSSampler()
+            sampler.start()
+            t0 = time.perf_counter()
+            manifest = b_engine.create_pre_mutation_backup([src_file])
+            t1 = time.perf_counter()
+            mem = sampler.stop()
+
+            elapsed = t1 - t0
+            self.assertTrue(manifest.verified)
+            print(f"[BENCH 500MB BACKUP] Bytes: {written}, Time: {elapsed:.3f}s, Baseline: {mem['baseline_mb']:.1f}MB, Peak: {mem['peak_mb']:.1f}MB, Final: {mem['final_mb']:.1f}MB")
+            if mem["baseline_mb"] > 0:
+                self.assertLess(mem["peak_delta_mb"], 50.0, "BackupEngine memory growth exceeded bounded streaming limit!")
 
 
 if __name__ == "__main__":

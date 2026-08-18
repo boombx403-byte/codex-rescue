@@ -55,6 +55,8 @@ class StateObserver:
         self.desktop_adapter = DesktopAdapter(self.codex_home)
         self._last_fs_state: Dict[str, FileValueSnapshot] = {}
         self._last_db_state: Dict[str, int] = {}
+        self._last_thread_values: Dict[str, Dict[str, Any]] = {}
+        self._last_cursor_values: Dict[str, ProjectionCursorValue] = {}
         self._snapshots: List[ObserverSnapshot] = []
         self.last_known_good: Optional[float] = None
         self.first_known_bad: Optional[float] = None
@@ -136,9 +138,10 @@ class StateObserver:
 
         self._last_fs_state = current_fs_state
 
-        # 2. Observe SQLite state databases and projection cursor values
+        # 2. Observe SQLite state databases, thread row values, and projection cursor values
         current_db_state: Dict[str, int] = {}
-        cursors: Dict[str, ProjectionCursorValue] = {}
+        current_thread_values: Dict[str, Dict[str, Any]] = {}
+        current_cursors: Dict[str, ProjectionCursorValue] = {}
 
         for db_name in ("state_5.sqlite", "state.db", "codex.db"):
             db_path = self.codex_home / db_name
@@ -160,6 +163,21 @@ class StateObserver:
                             cnt = int(cur.fetchone()[0])
                             current_db_state[f"{db_name}:{t}"] = cnt
 
+                        # Value-level thread row inspection
+                        if t == "threads":
+                            cur.execute("PRAGMA table_info('threads')")
+                            cols = {str(r[1]) for r in cur.fetchall()}
+                            if "id" in cols:
+                                sel_cols = ["id"]
+                                for opt_col in ("rollout_path", "updated_at", "archived"):
+                                    if opt_col in cols:
+                                        sel_cols.append(opt_col)
+                                cur.execute(f"SELECT {', '.join(sel_cols)} FROM threads")
+                                for r in cur.fetchall():
+                                    row_dict = {sel_cols[i]: r[i] for i in range(len(sel_cols))}
+                                    tid = str(row_dict["id"])
+                                    current_thread_values[tid] = row_dict
+
                         # Value-level projection cursor inspection
                         if t == "thread_history_projection_state":
                             cur.execute("PRAGMA table_info('thread_history_projection_state')")
@@ -170,7 +188,7 @@ class StateObserver:
                                     tid = str(r[0])
                                     byte_off = int(r[1])
                                     ord_val = int(r[2]) if len(r) > 2 and r[2] is not None else 0
-                                    cursors[tid] = ProjectionCursorValue(
+                                    current_cursors[tid] = ProjectionCursorValue(
                                         thread_id=tid,
                                         next_byte_offset=byte_off,
                                         next_ordinal=ord_val,
@@ -196,12 +214,47 @@ class StateObserver:
                 )
                 events.append(e)
 
+        # Detect SQLite row value changes (even when row count is constant)
+        for tid, row_val in current_thread_values.items():
+            if tid in self._last_thread_values and row_val != self._last_thread_values[tid]:
+                e = self.recorder.record_event(
+                    EventType.INDEX_ROW_UPDATED,
+                    session_id=tid,
+                    details={
+                        "target": "threads",
+                        "thread_id": tid,
+                        "old_values": self._last_thread_values[tid],
+                        "new_values": row_val,
+                        "source": "VALUE_OBSERVED",
+                    },
+                )
+                events.append(e)
+
+        # Detect projection cursor value changes
+        for tid, cursor_val in current_cursors.items():
+            if tid in self._last_cursor_values:
+                old_c = self._last_cursor_values[tid]
+                if old_c.next_byte_offset != cursor_val.next_byte_offset or old_c.next_ordinal != cursor_val.next_ordinal:
+                    e = self.recorder.record_event(
+                        EventType.CURSOR_ADVANCED,
+                        session_id=tid,
+                        details={
+                            "thread_id": tid,
+                            "old_offset": old_c.next_byte_offset,
+                            "new_offset": cursor_val.next_byte_offset,
+                            "source": "VALUE_OBSERVED",
+                        },
+                    )
+                    events.append(e)
+
         self._last_db_state = current_db_state
+        self._last_thread_values = current_thread_values
+        self._last_cursor_values = current_cursors
 
         # 3. Detect Writer Status
         writer_status = self.desktop_adapter.detect_writer_status()
 
-        # 4. Invariant Evaluation & Timeline Analysis
+        # 4. Invariant Evaluation & Timeline Analysis (LKG / FKB)
         invariants: List[InvariantCheckResult] = []
         inv_writer = InvariantEngine.check_active_writer(
             has_active_writer=(writer_status == WriterStatus.ACTIVE_CONFIRMED),
@@ -214,7 +267,7 @@ class StateObserver:
         snapshot = ObserverSnapshot(
             timestamp=now,
             files=current_fs_state,
-            cursors=cursors,
+            cursors=current_cursors,
             writer_status=writer_status,
             invariants_passed=all_passed,
             invariants=invariants,

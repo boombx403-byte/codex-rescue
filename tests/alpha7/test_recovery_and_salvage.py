@@ -68,7 +68,7 @@ class RecoveryAndSalvageTests(unittest.TestCase):
 
             engine = StreamSalvageEngine(oversized_threshold=1000)
             res = engine.scan_file(f1)
-            self.assertEqual(res.source_status, "HEALTHY")
+            self.assertEqual(res.source_status, "VALID_BUT_OVERSIZED")
             self.assertEqual(res.oversized_records_count, 1)
 
     def test_stream_salvage_truncated_tail(self):
@@ -79,7 +79,7 @@ class RecoveryAndSalvageTests(unittest.TestCase):
 
             engine = StreamSalvageEngine()
             res = engine.scan_file(f1)
-            self.assertEqual(res.source_status, "RECOVERABLE_WITH_TAIL_TRUNCATION")
+            self.assertEqual(res.source_status, "TRUNCATED_TRANSCRIPT")
             self.assertTrue(res.has_truncated_tail)
             self.assertEqual(res.valid_records_count, 2)
             self.assertGreater(res.valid_prefix_bytes, 0)

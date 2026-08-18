@@ -9,7 +9,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from codex_rescue.alpha7.graph import PathNamespace, detect_path_namespace
 from codex_rescue.alpha7.invariants import (
@@ -19,7 +19,8 @@ from codex_rescue.alpha7.invariants import (
     InvariantId,
     InvariantStatus,
 )
-from codex_rescue.alpha7.simulation.transaction import compute_file_sha256
+from codex_rescue.alpha7.recovery.salvage_stream import SourceStatus, StreamSalvageEngine
+from codex_rescue.alpha7.simulation.transaction import SchemaFingerprint, compute_file_sha256
 
 
 @dataclass
@@ -32,9 +33,9 @@ class PortableManifest:
     created_at: float
     source_platform: str
     source_namespace: str
-    source_integrity: str = "PROVEN_COMPLETE"  # PROVEN_COMPLETE, VALID_WITH_OVERSIZED_RECORDS, CORRUPTED, TRUNCATED
+    source_integrity: str = SourceStatus.HEALTHY  # HEALTHY, VALID_BUT_OVERSIZED, CORRUPTED, TRUNCATED_TRANSCRIPT
     records_count: int = 0
-    rollout_schema_version: int = 1
+    package_classification: str = "SAFE_MIGRATION_PACKAGE"  # SAFE_MIGRATION_PACKAGE, FORENSIC_PACKAGE
     archive_state: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -50,7 +51,7 @@ class PortableManifest:
             "source_namespace": self.source_namespace,
             "source_integrity": self.source_integrity,
             "records_count": self.records_count,
-            "rollout_schema_version": self.rollout_schema_version,
+            "package_classification": self.package_classification,
             "archive_state": self.archive_state,
             "metadata": self.metadata,
         }
@@ -64,6 +65,7 @@ class ImportPlan:
     conflict_reason: Optional[str]
     safe_to_import: bool
     requires_remapping: bool
+    package_classification: str = "SAFE_MIGRATION_PACKAGE"
     invariants: List[InvariantCheckResult] = field(default_factory=list)
 
     @property
@@ -82,6 +84,7 @@ class ImportPlan:
             "conflict_reason": self.conflict_reason,
             "safe_to_import": self.safe_to_import,
             "requires_remapping": self.requires_remapping,
+            "package_classification": self.package_classification,
             "invariants": [
                 {"id": i.invariant_id.value, "status": i.status.value, "message": i.message}
                 for i in self.invariants
@@ -90,31 +93,7 @@ class ImportPlan:
 
 
 class PortableSessionEngine:
-    """Exports and imports portable session packages with integrity, streaming I/O, and transactional derived state reconstruction."""
-
-    @staticmethod
-    def evaluate_source_integrity(session_path: Path) -> Tuple[str, int]:
-        """Scans session rollout line by line to determine honest integrity status and record count."""
-        records_count = 0
-        has_malformed = False
-        has_truncated = False
-
-        with session_path.open("r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line_s = line.strip()
-                if not line_s:
-                    continue
-                records_count += 1
-                try:
-                    json.loads(line_s)
-                except Exception:
-                    has_malformed = True
-
-        if has_malformed:
-            return "CORRUPTED", records_count
-        if has_truncated:
-            return "TRUNCATED", records_count
-        return "PROVEN_COMPLETE", records_count
+    """Exports and imports portable session packages using canonical integrity scans and secure archive validation."""
 
     @staticmethod
     def export_session(
@@ -127,18 +106,25 @@ class PortableSessionEngine:
         if not session_path.exists():
             raise FileNotFoundError(f"Session file not found: {session_path}")
 
+        # 1. Canonical source scan
+        salvage_engine = StreamSalvageEngine()
+        salvage_res = salvage_engine.scan_file(session_path)
+
         sha = compute_file_sha256(session_path)
         file_size = session_path.stat().st_size
         session_id = session_path.stem
         if session_id.startswith("rollout-"):
             session_id = session_id[8:]
 
-        # Run source integrity scan
-        source_integrity, records_count = PortableSessionEngine.evaluate_source_integrity(session_path)
-
         meta = dict(metadata or {})
         if workspace_path:
             meta["workspace_path"] = workspace_path
+
+        classification = (
+            "SAFE_MIGRATION_PACKAGE"
+            if salvage_res.is_migration_safe
+            else "FORENSIC_PACKAGE"
+        )
 
         ns = detect_path_namespace(session_path)
         manifest = PortableManifest(
@@ -150,8 +136,9 @@ class PortableSessionEngine:
             created_at=time.time(),
             source_platform=os.name,
             source_namespace=ns.value,
-            source_integrity=source_integrity,
-            records_count=records_count,
+            source_integrity=salvage_res.source_status,
+            records_count=salvage_res.valid_records_count + salvage_res.oversized_records_count,
+            package_classification=classification,
             archive_state=is_archived,
             metadata=meta,
         )
@@ -164,6 +151,41 @@ class PortableSessionEngine:
         return manifest
 
     @staticmethod
+    def validate_zip_security(zf: zipfile.ZipFile) -> None:
+        """Enforces canonical archive entry security and zip bomb protection."""
+        seen_names: Set[str] = set()
+        total_uncompressed = 0
+        total_compressed = 0
+
+        for info in zf.infolist():
+            name = info.filename
+            # Normalize and reject path traversal attacks
+            if "\x00" in name:
+                raise ValueError(f"Zip entry contains NUL byte: {name}")
+            if ".." in name.replace("\\", "/").split("/"):
+                raise ValueError(f"Zip path traversal detected: {name}")
+            if name.startswith("/") or name.startswith("\\"):
+                raise ValueError(f"Absolute zip entry detected: {name}")
+            if len(name) > 1 and name[1] == ":":
+                raise ValueError(f"Windows drive path detected in zip: {name}")
+            if name.startswith("//") or name.startswith("\\\\"):
+                raise ValueError(f"UNC path detected in zip: {name}")
+
+            norm_name = name.replace("\\", "/").lower()
+            if norm_name in seen_names:
+                raise ValueError(f"Duplicate zip entry detected: {name}")
+            seen_names.add(norm_name)
+
+            total_uncompressed += info.file_size
+            total_compressed += info.compress_size or 1
+
+        # Zip bomb protection: max ratio 100x and max size 5GB
+        if total_uncompressed > 5 * 1024 * 1024 * 1024:
+            raise ValueError("Oversized uncompressed archive (>5GB)")
+        if total_uncompressed > 100 * total_compressed and total_uncompressed > 10 * 1024 * 1024:
+            raise ValueError(f"Zip bomb expansion ratio exceeded: {total_uncompressed}/{total_compressed}")
+
+    @staticmethod
     def inspect_package(package_zip_path: Path) -> PortableManifest:
         if not package_zip_path.exists():
             raise FileNotFoundError(f"Package not found: {package_zip_path}")
@@ -171,10 +193,7 @@ class PortableSessionEngine:
         try:
             with zipfile.ZipFile(package_zip_path, "r") as zf:
                 # 1. Security validation of zip entries
-                for info in zf.infolist():
-                    name = info.filename
-                    if ".." in name or name.startswith("/") or name.startswith("\\"):
-                        raise ValueError(f"Zip path traversal detected: {name}")
+                PortableSessionEngine.validate_zip_security(zf)
 
                 if "manifest.json" not in zf.namelist():
                     raise ValueError("Package missing manifest.json")
@@ -214,13 +233,16 @@ class PortableSessionEngine:
         manifest = PortableSessionEngine.inspect_package(package_zip_path)
         invariants: List[InvariantCheckResult] = []
 
-        # Check schema support (INV-007)
-        inv_schema = InvariantEngine.check_schema_support(
-            manifest.rollout_schema_version,
-            {1},
-            is_mutation_operation=True,
+        # Check source integrity: forensic packages cannot be imported as standard migration (INV-004)
+        is_safe_pkg = (manifest.package_classification == "SAFE_MIGRATION_PACKAGE") and (
+            manifest.source_integrity in (SourceStatus.HEALTHY, SourceStatus.VALID_BUT_OVERSIZED)
         )
-        invariants.append(inv_schema)
+        inv_src = InvariantCheckResult(
+            invariant_id=InvariantId.INV_004,
+            status=InvariantStatus.PASS if is_safe_pkg else InvariantStatus.FAIL,
+            message="Source package integrity is migration-safe." if is_safe_pkg else f"Source package integrity is {manifest.source_integrity} ({manifest.package_classification}); migration blocked.",
+        )
+        invariants.append(inv_src)
 
         target_dir = (
             target_codex_home / "archived_sessions"
@@ -235,7 +257,7 @@ class PortableSessionEngine:
             conflict = True
             reason = f"Target session file already exists: {target_file}"
 
-        safe = inv_schema.passed and not conflict and manifest.source_integrity == "PROVEN_COMPLETE"
+        safe = is_safe_pkg and not conflict
 
         return ImportPlan(
             session_id=manifest.session_id,
@@ -244,6 +266,7 @@ class PortableSessionEngine:
             conflict_reason=reason,
             safe_to_import=safe,
             requires_remapping=(manifest.source_platform != os.name),
+            package_classification=manifest.package_classification,
             invariants=invariants,
         )
 
@@ -253,11 +276,10 @@ class PortableSessionEngine:
         target_codex_home: Path,
         plan: Optional[ImportPlan] = None,
         dry_run: bool = False,
-        rebuild_sqlite_index: bool = True,
-    ) -> Any:
+    ) -> Dict[str, Any]:
         active_plan = plan or PortableSessionEngine.plan_import(package_zip_path, target_codex_home)
         if not active_plan.safe_to_import:
-            return {"success": False, "action": "BLOCKED", "reason": active_plan.conflict_reason}
+            return {"success": False, "action": "BLOCKED", "reason": active_plan.conflict_reason or "Import preconditions not satisfied"}
 
         if dry_run:
             return {"success": True, "action": "DRY_RUN_PASSED", "plan": active_plan.to_dict()}
@@ -289,71 +311,16 @@ class PortableSessionEngine:
                     pass
             return {"success": False, "action": "ROLLED_BACK", "reason": "Extracted file hash verification failed"}
 
-        # 3. Reconstruct derived SQLite index in target CODEX_HOME
-        if rebuild_sqlite_index:
-            state_db = target_codex_home / "state_5.sqlite"
-            try:
-                state_db.parent.mkdir(parents=True, exist_ok=True)
-                conn = sqlite3.connect(str(state_db), timeout=5.0)
-                try:
-                    cur = conn.cursor()
-                    cur.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name='threads'")
-                    if not cur.fetchone():
-                        cur.execute(
-                            """
-                            CREATE TABLE IF NOT EXISTS threads (
-                                id TEXT PRIMARY KEY,
-                                rollout_path TEXT NOT NULL,
-                                created_at INTEGER NOT NULL,
-                                updated_at INTEGER NOT NULL,
-                                source TEXT NOT NULL DEFAULT 'cli',
-                                model_provider TEXT NOT NULL DEFAULT 'openai',
-                                cwd TEXT NOT NULL DEFAULT '',
-                                title TEXT NOT NULL DEFAULT '',
-                                sandbox_policy TEXT NOT NULL DEFAULT 'read-only',
-                                approval_mode TEXT NOT NULL DEFAULT 'auto'
-                            )
-                            """
-                        )
-
-                    cur.execute("PRAGMA table_info('threads')")
-                    existing_cols = {r[1]: r for r in cur.fetchall()}
-                    now_ts = int(time.time())
-
-                    row_data = {
-                        "id": manifest.session_id,
-                        "rollout_path": str(target_path.resolve()),
-                        "created_at": now_ts,
-                        "updated_at": now_ts,
-                        "source": "cli",
-                        "model_provider": "openai",
-                        "cwd": str(target_codex_home),
-                        "title": manifest.session_id,
-                        "sandbox_policy": "read-only",
-                        "approval_mode": "auto",
-                    }
-
-                    cols_to_insert = [c for c in row_data if c in existing_cols]
-                    placeholders = ", ".join("?" for _ in cols_to_insert)
-                    col_names = ", ".join(f'"{c}"' for c in cols_to_insert)
-                    values = tuple(row_data[c] for c in cols_to_insert)
-
-                    cur.execute(f"INSERT OR REPLACE INTO threads ({col_names}) VALUES ({placeholders})", values)
-                    conn.commit()
-                finally:
-                    conn.close()
-            except Exception as e:
-                # Fail-closed rollback: Remove copied rollout file
-                if target_path.exists():
-                    try:
-                        target_path.unlink()
-                    except Exception:
-                        pass
-                return {
-                    "success": False,
-                    "action": "ROLLED_BACK",
-                    "reason": f"SQLite index reconstruction failed: {e}",
-                }
+        # 3. Policy: Do NOT manufacture fake state_5.sqlite or threads table
+        state_db = target_codex_home / "state_5.sqlite"
+        if not state_db.exists():
+            return {
+                "success": True,
+                "action": "SOURCE_IMPORTED_DERIVED_STATE_NOT_REBUILT",
+                "session_id": manifest.session_id,
+                "target_path": str(target_path),
+                "note": "Canonical rollout imported; state DB not present in target environment.",
+            }
 
         return {
             "success": True,

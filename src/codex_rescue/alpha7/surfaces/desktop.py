@@ -133,50 +133,137 @@ class DesktopHealthReport:
         }
 
 
+class ProbeOutcome(str, enum.Enum):
+    SUCCESS_ACTIVE = "SUCCESS_ACTIVE"
+    SUCCESS_INACTIVE = "SUCCESS_INACTIVE"
+    ERROR = "ERROR"
+    UNSUPPORTED = "UNSUPPORTED"
+
+
+@dataclass
+class ProcessProbeResult:
+    status: ProbeOutcome
+    pids: List[int] = field(default_factory=list)
+    desktop_pids: List[int] = field(default_factory=list)
+    cli_pids: List[int] = field(default_factory=list)
+    app_server_pids: List[int] = field(default_factory=list)
+    unknown_pids: List[int] = field(default_factory=list)
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "pids": self.pids,
+            "desktop_pids": self.desktop_pids,
+            "cli_pids": self.cli_pids,
+            "app_server_pids": self.app_server_pids,
+            "unknown_pids": self.unknown_pids,
+            "error": self.error,
+        }
+
+
+@dataclass
+class SqliteLockProbeResult:
+    status: ProbeOutcome
+    locked_dbs: List[str] = field(default_factory=list)
+    tested_dbs: List[str] = field(default_factory=list)
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "locked_dbs": self.locked_dbs,
+            "tested_dbs": self.tested_dbs,
+            "error": self.error,
+        }
+
+
 class DesktopAdapter:
-    """Production-grade Codex Desktop adapter with multi-DB discovery, schema introspection, and process/writer tracking."""
+    """Codex Desktop adapter with multi-DB discovery, schema introspection, and fail-closed writer tracking."""
 
     def __init__(self, codex_home: Optional[Path] = None):
         self.codex_home = codex_home or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 
-    def detect_running_processes(self) -> Tuple[bool, List[int]]:
-        """Introspects OS process table for active Codex Desktop / electron instances."""
-        pids: List[int] = []
+    def detect_running_processes_detailed(self) -> ProcessProbeResult:
+        """Introspects OS process table with defensible classification into Desktop, CLI, and App Server."""
         system = platform.system()
+        res_pids: List[int] = []
+        desktop_pids: List[int] = []
+        cli_pids: List[int] = []
+        app_server_pids: List[int] = []
+        unknown_pids: List[int] = []
 
         try:
             if system == "Windows":
+                # Use tasklist to get matching tasks
                 cmd = ["tasklist", "/FI", "IMAGENAME eq Codex.exe", "/FO", "CSV", "/NH"]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
-                if res.returncode == 0:
-                    for line in res.stdout.splitlines():
-                        parts = [p.strip(' "') for p in line.split(",")]
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            pids.append(int(parts[1]))
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3.0)
+                if proc.returncode != 0:
+                    return ProcessProbeResult(status=ProbeOutcome.ERROR, error=f"tasklist returned {proc.returncode}: {proc.stderr}")
+
+                for line in proc.stdout.splitlines():
+                    parts = [p.strip(' "') for p in line.split(",")]
+                    if len(parts) >= 2 and parts[0].lower() == "codex.exe" and parts[1].isdigit():
+                        pid = int(parts[1])
+                        res_pids.append(pid)
+                        desktop_pids.append(pid)
+            elif system == "Linux" or system == "Darwin":
+                cmd = ["ps", "-eo", "pid,comm,args"]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3.0)
+                if proc.returncode != 0:
+                    return ProcessProbeResult(status=ProbeOutcome.ERROR, error=f"ps returned {proc.returncode}: {proc.stderr}")
+
+                for line in proc.stdout.splitlines():
+                    parts = line.strip().split(None, 2)
+                    if len(parts) >= 2 and parts[0].isdigit():
+                        pid = int(parts[0])
+                        comm = parts[1].lower()
+                        args = parts[2].lower() if len(parts) > 2 else ""
+
+                        if "codex" in comm or "codex" in args:
+                            # Filter out ourselves (e.g. pytest or python runner)
+                            if "python" in comm and "codex_rescue" in args:
+                                continue
+                            res_pids.append(pid)
+                            if "app-server" in args:
+                                app_server_pids.append(pid)
+                            elif "electron" in args or "codex-desktop" in comm:
+                                desktop_pids.append(pid)
+                            elif comm == "codex" or "codex-cli" in args:
+                                cli_pids.append(pid)
+                            else:
+                                unknown_pids.append(pid)
             else:
-                cmd = ["pgrep", "-f", "Codex"]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
-                if res.returncode == 0:
-                    for line in res.stdout.splitlines():
-                        if line.strip().isdigit():
-                            pids.append(int(line.strip()))
-        except Exception:
-            pass
+                return ProcessProbeResult(status=ProbeOutcome.UNSUPPORTED, error=f"Unsupported OS platform: {system}")
 
-        return len(pids) > 0, pids
+            status = ProbeOutcome.SUCCESS_ACTIVE if len(res_pids) > 0 else ProbeOutcome.SUCCESS_INACTIVE
+            return ProcessProbeResult(
+                status=status,
+                pids=res_pids,
+                desktop_pids=desktop_pids,
+                cli_pids=cli_pids,
+                app_server_pids=app_server_pids,
+                unknown_pids=unknown_pids,
+            )
+        except Exception as e:
+            return ProcessProbeResult(status=ProbeOutcome.ERROR, error=str(e))
 
-    def detect_writer_status(self) -> WriterStatus:
-        """Determines active writer state based on process table and active SQLite write locks."""
+    def detect_running_processes(self) -> Tuple[bool, List[int]]:
+        """Legacy helper returning boolean and PID list."""
+        rep = self.detect_running_processes_detailed()
+        return (rep.status == ProbeOutcome.SUCCESS_ACTIVE), rep.pids
+
+    def probe_sqlite_locks(self) -> SqliteLockProbeResult:
+        """Tests SQLite database files for active exclusive write locks."""
+        locked: List[str] = []
+        tested: List[str] = []
+
         try:
-            has_proc, pids = self.detect_running_processes()
-            if has_proc:
-                return WriterStatus.ACTIVE_CONFIRMED
-
-            # Check if any database in CODEX_HOME is actively locked by an external process
             for db_name in SQLITE_DB_CLASSIFICATIONS.keys():
                 db_path = self.codex_home / db_name
                 if not db_path.exists():
                     continue
+                tested.append(db_name)
                 try:
                     conn = sqlite3.connect(str(db_path), timeout=0.05)
                     try:
@@ -184,15 +271,49 @@ class DesktopAdapter:
                         conn.rollback()
                     finally:
                         conn.close()
-                except sqlite3.OperationalError:
-                    # Database is locked by an active external writer
-                    return WriterStatus.ACTIVE_CONFIRMED
-                except Exception:
-                    pass
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() or "busy" in str(e).lower():
+                        locked.append(db_name)
+                    else:
+                        return SqliteLockProbeResult(
+                            status=ProbeOutcome.ERROR,
+                            locked_dbs=locked,
+                            tested_dbs=tested,
+                            error=f"OperationalError on {db_name}: {e}",
+                        )
+                except Exception as e:
+                    return SqliteLockProbeResult(
+                        status=ProbeOutcome.ERROR,
+                        locked_dbs=locked,
+                        tested_dbs=tested,
+                        error=f"Unexpected error probing {db_name}: {e}",
+                    )
 
-            return WriterStatus.INACTIVE_CONFIRMED
-        except Exception:
+            status = ProbeOutcome.SUCCESS_ACTIVE if len(locked) > 0 else ProbeOutcome.SUCCESS_INACTIVE
+            return SqliteLockProbeResult(status=status, locked_dbs=locked, tested_dbs=tested)
+        except Exception as e:
+            return SqliteLockProbeResult(status=ProbeOutcome.ERROR, error=str(e))
+
+    def detect_writer_status(self) -> WriterStatus:
+        """Determines active writer state based on fail-closed aggregation of all required probes."""
+        proc_probe = self.detect_running_processes_detailed()
+        lock_probe = self.probe_sqlite_locks()
+
+        # Rule 1: ANY reliable probe reports active writer -> ACTIVE_CONFIRMED
+        if proc_probe.status == ProbeOutcome.SUCCESS_ACTIVE or lock_probe.status == ProbeOutcome.SUCCESS_ACTIVE:
+            return WriterStatus.ACTIVE_CONFIRMED
+
+        # Rule 2: ANY required probe encountered an ERROR or UNSUPPORTED preventing certainty -> UNKNOWN
+        if proc_probe.status in (ProbeOutcome.ERROR, ProbeOutcome.UNSUPPORTED):
             return WriterStatus.UNKNOWN
+        if lock_probe.status in (ProbeOutcome.ERROR, ProbeOutcome.UNSUPPORTED):
+            return WriterStatus.UNKNOWN
+
+        # Rule 3: ALL required reliable checks confirmed inactive -> INACTIVE_CONFIRMED
+        if proc_probe.status == ProbeOutcome.SUCCESS_INACTIVE and lock_probe.status == ProbeOutcome.SUCCESS_INACTIVE:
+            return WriterStatus.INACTIVE_CONFIRMED
+
+        return WriterStatus.UNKNOWN
 
     def discover_all_sessions(
         self,

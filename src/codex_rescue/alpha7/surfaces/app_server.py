@@ -62,6 +62,8 @@ class StdioJsonRpcClient:
         self._pending_responses: Dict[int, Dict[str, Any]] = {}
         self._pending_events: Dict[int, threading.Event] = {}
         self._notifications: List[Dict[str, Any]] = []
+        self._server_requests: List[Dict[str, Any]] = []
+        self._protocol_errors: List[Dict[str, Any]] = []
         self._running = True
         self.is_initialized = False
 
@@ -70,7 +72,7 @@ class StdioJsonRpcClient:
         self._reader_thread.start()
 
     def _reader_loop(self) -> None:
-        """Background thread continually decoding incoming messages and correlating IDs."""
+        """Background thread continually decoding incoming messages and routing by exact RPC classification."""
         try:
             while self._running:
                 if not self.process.stdout:
@@ -88,23 +90,55 @@ class StdioJsonRpcClient:
 
                 try:
                     msg = json.loads(line_str)
-                except Exception:
+                except Exception as e:
+                    with self._lock:
+                        self._protocol_errors.append({"raw_line": line_str, "decode_error": str(e)})
                     continue
 
                 if not isinstance(msg, dict):
+                    with self._lock:
+                        self._protocol_errors.append({"raw_line": line_str, "error": "Message is not a JSON object"})
                     continue
 
-                # Check if this is a response to a pending request
-                if "id" in msg and msg["id"] is not None:
+                has_method = "method" in msg
+                has_id = ("id" in msg) and (msg["id"] is not None)
+                has_result_or_error = ("result" in msg) or ("error" in msg)
+
+                # 1. SERVER_REQUEST: has both method and id
+                if has_method and has_id:
+                    req_id = msg["id"]
+                    with self._lock:
+                        self._server_requests.append(msg)
+                    # Reply with method not supported to avoid server hanging
+                    err_reply = json.dumps({
+                        "id": req_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Server request method '{msg['method']}' not supported on read-only client",
+                        }
+                    }) + "\n"
+                    try:
+                        self._write_stdin(err_reply)
+                    except Exception:
+                        pass
+
+                # 2. NOTIFICATION: has method but no id
+                elif has_method:
+                    with self._lock:
+                        self._notifications.append(msg)
+
+                # 3. RESPONSE: has id and result/error
+                elif has_id and has_result_or_error:
                     req_id = msg["id"]
                     with self._lock:
                         self._pending_responses[req_id] = msg
                         if req_id in self._pending_events:
                             self._pending_events[req_id].set()
-                elif "method" in msg:
-                    # Asynchronous notification or server request
+
+                # 4. PROTOCOL_ERROR: unrecognized format
+                else:
                     with self._lock:
-                        self._notifications.append(msg)
+                        self._protocol_errors.append(msg)
         finally:
             self._running = False
             # Unblock any waiting callers on process termination/EOF
@@ -188,11 +222,18 @@ class StdioJsonRpcClient:
             pass
 
     def get_notifications(self) -> List[Dict[str, Any]]:
-        """Returns and drains buffered server notifications."""
         with self._lock:
             notifs = list(self._notifications)
             self._notifications.clear()
             return notifs
+
+    def get_server_requests(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(self._server_requests)
+
+    def get_protocol_errors(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(self._protocol_errors)
 
     def close(self) -> None:
         """Stops the reader thread and shuts down stdio."""

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -155,6 +156,23 @@ while True:
             sess = sdir / "session_tx.jsonl"
             sess.write_text('{"turn": 1, "prompt": "test"}\n', encoding="utf-8")
 
+            # Setup valid state_5.sqlite
+            state_db = chome / "state_5.sqlite"
+            conn = sqlite3.connect(str(state_db))
+            conn.execute("PRAGMA user_version = 5")
+            conn.execute(
+                """
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY,
+                    rollout_path TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+
             engine = TransactionalRepairEngine(chome)
             res = engine.execute_derived_index_repair(sess)
 
@@ -164,7 +182,6 @@ while True:
             self.assertEqual(res.applied_mutations_count, 1)
 
             # Verify SQLite DB exists and contains index
-            state_db = chome / "state_5.sqlite"
             self.assertTrue(state_db.exists())
 
     def test_state_observer_detects_real_changes(self):
@@ -203,7 +220,7 @@ while True:
             # 1. Export
             manifest = PortableSessionEngine.export_session(sess_file, zip_path)
             self.assertEqual(manifest.session_id, "s_export")
-            self.assertEqual(manifest.source_integrity, "PROVEN_COMPLETE")
+            self.assertEqual(manifest.source_integrity, "HEALTHY")
 
             # 2. Inspect
             inspected = PortableSessionEngine.inspect_package(zip_path)
@@ -213,9 +230,9 @@ while True:
             plan = PortableSessionEngine.plan_import(zip_path, tgt_home)
             self.assertTrue(plan.safe_to_import)
 
-            res = PortableSessionEngine.execute_import(zip_path, tgt_home, rebuild_sqlite_index=True)
+            res = PortableSessionEngine.execute_import(zip_path, tgt_home)
             self.assertTrue(res["success"])
-            self.assertEqual(res["action"], "IMPORTED")
+            self.assertEqual(res["action"], "SOURCE_IMPORTED_DERIVED_STATE_NOT_REBUILT")
 
             # 4. Verify target state
             tgt_file = tgt_home / "sessions" / "s_export.jsonl"
@@ -223,7 +240,7 @@ while True:
             self.assertEqual(tgt_file.read_text(encoding="utf-8"), sess_file.read_text(encoding="utf-8"))
 
             tgt_db = tgt_home / "state_5.sqlite"
-            self.assertTrue(tgt_db.exists())
+            self.assertFalse(tgt_db.exists(), "Rescue must not manufacture fake state_5.sqlite on import")
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ from codex_rescue.alpha7.surfaces.router import DiagnosticRoute, DiagnosticRoute
 class AutopilotResult:
     topology: EnvironmentTopology
     selected_surface: str
-    action_taken: str  # "INSPECTED", "SIMULATION_PASSED", "REPAIRED", "ROLLED_BACK", "BLOCKED", "NO_REPAIRABLE_TARGETS", "MULTIPLE_REPAIR_TARGETS"
+    action_taken: str  # "INSPECTED", "SIMULATION_PASSED", "REPAIRED", "ROLLED_BACK", "ROLLBACK_FAILED", "BLOCKED", "NO_REPAIRABLE_TARGETS", "MULTIPLE_REPAIR_TARGETS", "SURFACE_SELECTION_REQUIRED", "CANCELLED"
     diagnostics: List[DiagnosticRoute] = field(default_factory=list)
     transaction: Optional[TransactionResult] = None
     discovered_sessions_count: int = 0
@@ -73,21 +73,10 @@ class AutopilotEngine:
         self.repair_engine = TransactionalRepairEngine(self.codex_home)
 
     def prompt_surface_selection(self, available_surfaces: List[str]) -> str:
-        """Prompts user interactively on terminal for surface selection."""
-        sys.stdout.write("\nCodex Rescue detected multiple Codex surfaces.\n")
-        sys.stdout.write("What do you want to inspect?\n")
-        sys.stdout.write("  1. CLI\n")
-        sys.stdout.write("  2. Desktop\n")
-        sys.stdout.write("  3. IDE / Extension\n")
-        sys.stdout.write("  4. Everything\n")
-        sys.stdout.write("Select [1-4]: ")
-        sys.stdout.flush()
-
-        try:
-            choice = sys.stdin.readline().strip()
-        except (EOFError, KeyboardInterrupt):
-            sys.stdout.write("\n")
-            return "all"
+        """Prompts user interactively on terminal for surface selection with bounded retries and non-TTY safety."""
+        if not sys.stdin.isatty():
+            # In non-interactive pipe/script without explicit flag, fail-closed
+            return "SURFACE_SELECTION_REQUIRED"
 
         mapping = {
             "1": "cli",
@@ -100,7 +89,39 @@ class AutopilotEngine:
             "all": "all",
             "everything": "all",
         }
-        return mapping.get(choice.lower(), "all")
+
+        retries = 3
+        while retries > 0:
+            sys.stdout.write("\nCodex Rescue detected multiple Codex surfaces.\n")
+            sys.stdout.write("What do you want to inspect?\n")
+            sys.stdout.write("  1. CLI\n")
+            sys.stdout.write("  2. Desktop\n")
+            sys.stdout.write("  3. IDE / Extension\n")
+            sys.stdout.write("  4. Everything\n")
+            sys.stdout.write("Select [1-4]: ")
+            sys.stdout.flush()
+
+            try:
+                line = sys.stdin.readline()
+                if not line:  # EOF
+                    sys.stdout.write("\n")
+                    return "CANCELLED"
+                choice = line.strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                sys.stdout.write("\n")
+                return "CANCELLED"
+
+            if choice in mapping:
+                return mapping[choice]
+
+            retries -= 1
+            if retries > 0:
+                sys.stdout.write(f"Invalid selection '{choice}'. Please enter 1, 2, 3, or 4.\n")
+            else:
+                sys.stdout.write("Too many invalid selections. Aborting surface prompt.\n")
+                return "CANCELLED"
+
+        return "CANCELLED"
 
     def run_autopilot(
         self,
@@ -120,10 +141,29 @@ class AutopilotEngine:
             selected_surface = surface.lower()
         elif len(detected_surfaces) == 1:
             selected_surface = detected_surfaces[0]
-        elif len(detected_surfaces) > 1 and not no_prompt:
-            selected_surface = self.prompt_surface_selection(detected_surfaces)
+        elif len(detected_surfaces) > 1:
+            if no_prompt:
+                selected_surface = "all"
+            else:
+                selected_surface = self.prompt_surface_selection(detected_surfaces)
         else:
             selected_surface = "all"
+
+        if selected_surface == "SURFACE_SELECTION_REQUIRED":
+            return AutopilotResult(
+                topology=topology,
+                selected_surface="unknown",
+                action_taken="SURFACE_SELECTION_REQUIRED",
+                message="Multiple Codex surfaces detected in non-interactive environment. Explicit selection required: pass --surface <cli|desktop|ide|all> or --no-prompt.",
+            )
+
+        if selected_surface == "CANCELLED":
+            return AutopilotResult(
+                topology=topology,
+                selected_surface="cancelled",
+                action_taken="CANCELLED",
+                message="Autopilot surface selection was cancelled.",
+            )
 
         # 3. Discover all sessions (standard, nested, and archived)
         discovered_sessions, is_trunc = self.desktop_adapter.discover_all_sessions()
@@ -208,7 +248,7 @@ class AutopilotEngine:
         # 5. Diagnostic Routing
         diagnostics = self.router.evaluate_environment(graph)
 
-        # 6. Transactional Repair Target Selection & Execution
+        # 6. Transactional Repair Target Selection & Execution (INV-012, Section 14, 15)
         tx_result: Optional[TransactionResult] = None
         action_taken = "INSPECTED"
         invariants: List[InvariantCheckResult] = []
@@ -224,16 +264,12 @@ class AutopilotEngine:
                 action_taken = tx_result.status
                 invariants.extend(tx_result.invariants)
             else:
-                # Find sessions with recoverable findings (e.g. absent from SQLite)
+                # Find only sessions with registered diagnostic findings
                 repairable_sessions = []
                 for s in discovered_sessions:
                     diff = self.desktop_adapter.get_session_diff(s.session_id)
                     if not diff["sqlite_exists"]:
                         repairable_sessions.append(s)
-
-                if not repairable_sessions and session_count > 0:
-                    # If all sessions are in sync or only 1 session exists without target
-                    repairable_sessions = discovered_sessions
 
                 if len(repairable_sessions) == 0:
                     action_taken = "NO_REPAIRABLE_TARGETS"
@@ -244,10 +280,8 @@ class AutopilotEngine:
                 elif no_prompt:
                     action_taken = "MULTIPLE_REPAIR_TARGETS"
                 else:
-                    # Interactive target selection or default to first diagnosed
-                    tx_result = self.repair_engine.execute_derived_index_repair(repairable_sessions[0].path)
-                    action_taken = tx_result.status
-                    invariants.extend(tx_result.invariants)
+                    # In interactive mode when multiple targets exist, do NOT blindly fallback to [0]
+                    action_taken = "MULTIPLE_REPAIR_TARGETS"
 
         msg = (
             f"Autopilot analyzed {session_count} sessions across surface '{selected_surface}'"

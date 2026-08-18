@@ -58,8 +58,10 @@ class AutopilotAndCLITests(unittest.TestCase):
     def test_self_test_engine(self):
         with safe_temp_codex_home() as td:
             rep = SelfTestEngine.run_self_test(td)
-            self.assertEqual(rep.overall_status, "PASS")
-            self.assertEqual(rep.passed_checks, rep.total_checks)
+            self.assertEqual(rep.rescue_runtime_status, "PASS")
+            self.assertEqual(rep.backup_engine_status, "PASS")
+            self.assertEqual(rep.invariant_engine_status, "PASS")
+            self.assertIn(rep.overall_status, ("PASS", "LIMITED"))
 
     def test_cli_dispatches(self):
         with safe_temp_codex_home() as chome:

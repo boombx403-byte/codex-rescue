@@ -47,7 +47,7 @@ class StressAndLargeFilesTests(unittest.TestCase):
 
             engine = StreamSalvageEngine(oversized_threshold=1_000_000)
             res = engine.scan_file(f)
-            self.assertEqual(res.source_status, "HEALTHY")
+            self.assertEqual(res.source_status, "VALID_BUT_OVERSIZED")
             self.assertEqual(res.oversized_records_count, 1)
             self.assertGreaterEqual(res.largest_record_bytes, 2 * 1024 * 1024)
 

@@ -12,6 +12,15 @@ class RecordClassification:
     MALFORMED_RECORD = "MALFORMED_RECORD"
     TRUNCATED_TRANSCRIPT = "TRUNCATED_TRANSCRIPT"
     UNCLASSIFIED_BYTES = "UNCLASSIFIED_BYTES"
+    INVALID_UTF8 = "INVALID_UTF8"
+
+
+class SourceStatus:
+    HEALTHY = "HEALTHY"
+    VALID_BUT_OVERSIZED = "VALID_BUT_OVERSIZED"
+    TRUNCATED_TRANSCRIPT = "TRUNCATED_TRANSCRIPT"
+    CORRUPTED = "CORRUPTED"
+    INCOMPLETE_SCAN = "INCOMPLETE_SCAN"
 
 
 @dataclass
@@ -21,11 +30,17 @@ class StreamSalvageResult:
     valid_records_count: int = 0
     oversized_records_count: int = 0
     malformed_records_count: int = 0
+    invalid_utf8_count: int = 0
     unclassified_bytes: int = 0
     has_truncated_tail: bool = False
     valid_prefix_bytes: int = 0
     largest_record_bytes: int = 0
-    source_status: str = "HEALTHY"  # HEALTHY, RECOVERABLE_WITH_TAIL_TRUNCATION, CORRUPTED
+    source_status: str = SourceStatus.HEALTHY
+
+    @property
+    def is_migration_safe(self) -> bool:
+        """Returns True only if all records are valid with 0 malformed records and 0 truncation."""
+        return self.source_status in (SourceStatus.HEALTHY, SourceStatus.VALID_BUT_OVERSIZED)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -34,16 +49,18 @@ class StreamSalvageResult:
             "valid_records_count": self.valid_records_count,
             "oversized_records_count": self.oversized_records_count,
             "malformed_records_count": self.malformed_records_count,
+            "invalid_utf8_count": self.invalid_utf8_count,
             "unclassified_bytes": self.unclassified_bytes,
             "has_truncated_tail": self.has_truncated_tail,
             "valid_prefix_bytes": self.valid_prefix_bytes,
             "largest_record_bytes": self.largest_record_bytes,
             "source_status": self.source_status,
+            "is_migration_safe": self.is_migration_safe,
         }
 
 
 class StreamSalvageEngine:
-    """Bounded, memory-efficient JSONL salvage scanner for Alpha7."""
+    """Canonical bounded, memory-efficient JSONL salvage scanner for Codex Rescue."""
 
     def __init__(self, oversized_threshold: int = 1_000_000, chunk_size: int = 65536):
         self.oversized_threshold = oversized_threshold
@@ -85,8 +102,17 @@ class StreamSalvageEngine:
                 is_still_clean_prefix = False
                 continue
 
+            # Strict UTF-8 decoding without errors="replace"
             try:
-                parsed = json.loads(stripped.decode("utf-8"))
+                decoded = stripped.decode("utf-8")
+            except UnicodeDecodeError:
+                result.invalid_utf8_count += 1
+                result.malformed_records_count += 1
+                is_still_clean_prefix = False
+                continue
+
+            try:
+                parsed = json.loads(decoded)
                 if line_len > self.oversized_threshold:
                     result.oversized_records_count += 1
                 else:
@@ -96,8 +122,9 @@ class StreamSalvageEngine:
                     valid_prefix_offset = result.scanned_bytes
 
             except Exception:
+                # Check if this malformed record occurs at EOF (tail truncation)
                 is_at_eof = (total_size is not None and result.scanned_bytes == total_size)
-                if is_at_eof:
+                if is_at_eof or getattr(stream, "peek", lambda: b"")() == b"":
                     result.has_truncated_tail = True
                 else:
                     result.malformed_records_count += 1
@@ -109,11 +136,16 @@ class StreamSalvageEngine:
         else:
             result.total_bytes = result.scanned_bytes
 
+        # Determine normalized canonical status
         if result.malformed_records_count > 0:
-            result.source_status = "CORRUPTED"
+            result.source_status = SourceStatus.CORRUPTED
         elif result.has_truncated_tail:
-            result.source_status = "RECOVERABLE_WITH_TAIL_TRUNCATION"
+            result.source_status = SourceStatus.TRUNCATED_TRANSCRIPT
+        elif result.unclassified_bytes > 0:
+            result.source_status = SourceStatus.INCOMPLETE_SCAN
+        elif result.oversized_records_count > 0:
+            result.source_status = SourceStatus.VALID_BUT_OVERSIZED
         else:
-            result.source_status = "HEALTHY"
+            result.source_status = SourceStatus.HEALTHY
 
         return result

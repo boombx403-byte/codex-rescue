@@ -288,13 +288,17 @@ def main(argv: list[str] | None = None) -> int:
             _json(res.to_dict(), command="self-test", status=res.overall_status)
         else:
             print(f"Codex Rescue Self-Test: {res.overall_status}")
+            print(f"Rescue Runtime: {res.rescue_runtime_status}")
+            print(f"Codex Binary: {res.codex_binary_status}")
+            print(f"Codex State: {res.codex_state_status}")
+            print(f"App Server: {res.app_server_status}")
             print(f"Passed: {res.passed_checks}/{res.total_checks} checks")
             for c in res.checks:
-                status_symbol = "OK" if c.passed else "FAIL"
+                status_symbol = "OK" if c.passed else c.status
                 print(f"  [{status_symbol}] {c.name}")
                 if c.error:
                     print(f"      Error: {c.error}")
-        return int(ExitCode.SUCCESS if res.overall_status == "PASS" else ExitCode.INTERNAL_FAILURE)
+        return int(ExitCode.SUCCESS if res.overall_status in ("PASS", "LIMITED") else ExitCode.INTERNAL_FAILURE)
 
     if args.command == "desktop":
         from .alpha7.surfaces.desktop import DesktopAdapter
