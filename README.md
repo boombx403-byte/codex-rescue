@@ -16,7 +16,7 @@
 </p>
 
 [![Release](https://img.shields.io/github/v/release/shleder/codex-rescue?include_prereleases&label=release&color=blue&style=flat-square)](https://github.com/shleder/codex-rescue/releases)
-[![npm version](https://img.shields.io/npm/v/codex-rescue?color=brightgreen&style=flat-square)](https://www.npmjs.com/package/codex-rescue)
+[![npm version](https://img.shields.io/badge/npm-v0.1.0--alpha.6-brightgreen?style=flat-square)](https://www.npmjs.com/package/codex-rescue)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square)](https://github.com/shleder/codex-rescue)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/shleder/codex-rescue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -190,8 +190,8 @@ codex-rescue report --latest -o report.html
 
 | Channel | Identifier | Status | Install Command |
 |---|---|---|---|
-| **npm (npx)** | `codex-rescue@0.1.0-alpha.6-2` | **Active** | `npx codex-rescue doctor --latest` |
-| **npm (global)** | `codex-rescue@0.1.0-alpha.6-2` | **Active** | `npm install -g codex-rescue` |
+| **npm (npx)** | `codex-rescue@0.1.0-alpha.6` | **Active** | `npx codex-rescue doctor --latest` |
+| **npm (global)** | `codex-rescue@0.1.0-alpha.6` | **Active** | `npm install -g codex-rescue` |
 | **GitHub Releases** | `v0.1.0-alpha.6` | **Active** | [Download Release Assets](https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha.6) |
 | **Python Package** | `0.1.0a6` | **Source / Build** | `pip install -e .` |
 
