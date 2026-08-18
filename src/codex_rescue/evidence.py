@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .redact import sanitize_path
+from .transcript import _read_line_bounded, MAX_RECORD_BYTES
+
+
+@dataclass
+class RolloutMetrics:
+    total_lines: int = 0
+    total_bytes: int = 0
+    records_by_type: dict[str, int] = field(default_factory=dict)
+    turn_count: int = 0
+    tool_call_count: int = 0
+    tool_output_count: int = 0
+    compaction_count: int = 0
+    inline_image_bytes: int = 0
+    inline_image_count: int = 0
+    tool_output_bytes: int = 0
+    last_ordinal: int | None = None
+    last_timestamp: str | None = None
+    has_trailing_newline: bool = True
+    is_truncated: bool = False
+    subagent_ids: list[str] = field(default_factory=list)
+    parent_id: str | None = None
+    unknown_record_kinds: list[str] = field(default_factory=list)
+    lifecycle_events: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class SqliteMetrics:
+    present: bool = False
+    db_path: str | None = None
+    thread_found: bool = False
+    thread_id: str | None = None
+    thread_title: str | None = None
+    item_count: int = 0
+    projection_cursor: int | None = None
+    history_mode: str | None = None
+    integrity_ok: bool = True
+    schema_version: int | None = None
+
+
+@dataclass
+class WriterMetrics:
+    lock_present: bool = False
+    lock_path: str | None = None
+    pid: int | None = None
+    is_alive: bool | None = None
+    runtime_surface: str | None = None
+    lock_age_seconds: float | None = None
+
+
+@dataclass
+class WorkspaceMetrics:
+    saved_cwd: str | None = None
+    saved_repo: str | None = None
+    path_family: str = "unknown"
+    accessible: bool = False
+    repo_accessible: bool = False
+    translated_path: str | None = None
+
+
+@dataclass
+class SessionEvidence:
+    session_id: str
+    session_path: str
+    is_archived: bool = False
+    mtime: float = 0.0
+    size_bytes: int = 0
+    rollout: RolloutMetrics = field(default_factory=RolloutMetrics)
+    sqlite: SqliteMetrics = field(default_factory=SqliteMetrics)
+    writer: WriterMetrics = field(default_factory=WriterMetrics)
+    workspace: WorkspaceMetrics = field(default_factory=WorkspaceMetrics)
+    findings: list[str] = field(default_factory=list)
+    status: str = "HEALTHY"
+    confidence: str = "HIGH"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def detect_path_family(p: str) -> str:
+    if not p:
+        return "unknown"
+    if p.startswith("/mnt/") and len(p) > 6 and p[6] == "/":
+        return "wsl"
+    if len(p) >= 2 and p[1] == ":" and (p[0].isalpha()):
+        return "windows"
+    if p.startswith("/"):
+        return "posix"
+    return "unknown"
+
+
+def translate_path(p: str) -> str | None:
+    fam = detect_path_family(p)
+    if fam == "wsl":
+        drive = p[5].upper()
+        rest = p[6:].replace("/", "\")
+        return f"{drive}:{rest}"
+    elif fam == "windows":
+        drive = p[0].lower()
+        rest = p[2:].replace("\", "/")
+        return f"/mnt/{drive}{rest}"
+    return None
+
+
+def is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def collect_session_evidence(
+    session_path: Path | str,
+    codex_home: Path | str | None = None,
+    max_scan_lines: int = 100_000,
+) -> SessionEvidence:
+    path = Path(session_path).resolve()
+    session_id = path.stem
+    if session_id.endswith(".jsonl"):
+        session_id = session_id[:-6]
+    is_archived = "archived_sessions" in str(path) or "archive" in path.parts
+
+    mtime = 0.0
+    size_bytes = 0
+    if path.exists():
+        stat = path.stat()
+        mtime = stat.st_mtime
+        size_bytes = stat.st_size
+
+    evidence = SessionEvidence(
+        session_id=session_id,
+        session_path=sanitize_path(path),
+        is_archived=is_archived,
+        mtime=mtime,
+        size_bytes=size_bytes,
+    )
+
+    lock_candidates = [
+        path.with_suffix(".lock"),
+        path.parent / f"{path.name}.lock",
+        path.parent / f"{session_id}.lock",
+    ]
+    for lc in lock_candidates:
+        if lc.exists():
+            evidence.writer.lock_present = True
+            evidence.writer.lock_path = sanitize_path(lc)
+            try:
+                lstat = lc.stat()
+                evidence.writer.lock_age_seconds = round(time.time() - lstat.st_mtime, 2)
+                content = lc.read_text(encoding="utf-8", errors="ignore").strip()
+                if content.isdigit():
+                    pid = int(content)
+                    evidence.writer.pid = pid
+                    evidence.writer.is_alive = is_pid_alive(pid)
+                    evidence.writer.runtime_surface = "cli" if evidence.writer.is_alive else "stale_lock"
+            except Exception:
+                pass
+            break
+
+    if path.exists() and size_bytes > 0:
+        try:
+            with open(path, "rb") as f:
+                lines = 0
+                while lines < max_scan_lines:
+                    line = _read_line_bounded(f, MAX_RECORD_BYTES)
+                    if not line:
+                        break
+                    lines += 1
+                    evidence.rollout.total_lines += 1
+                    evidence.rollout.total_bytes += len(line)
+                    try:
+                        record = json.loads(line.decode("utf-8", errors="ignore"))
+                    except Exception:
+                        if "MALFORMED_JSONL" not in evidence.findings:
+                            evidence.findings.append("MALFORMED_JSONL")
+                        continue
+
+                    rtype = record.get("type") or record.get("event") or "unknown"
+                    evidence.rollout.records_by_type[rtype] = evidence.rollout.records_by_type.get(rtype, 0) + 1
+
+                    ord_val = record.get("ordinal") or record.get("seq") or record.get("idx")
+                    if isinstance(ord_val, int):
+                        evidence.rollout.last_ordinal = ord_val
+                    ts = record.get("timestamp") or record.get("created_at") or record.get("time")
+                    if ts and isinstance(ts, str):
+                        evidence.rollout.last_timestamp = ts
+
+                    if rtype in ("turn_started", "user_message", "turn"):
+                        evidence.rollout.turn_count += 1
+                        evidence.rollout.lifecycle_events.append({
+                            "event": "turn_started",
+                            "ordinal": evidence.rollout.last_ordinal,
+                            "timestamp": ts,
+                        })
+                    elif rtype in ("tool_call", "function_call", "call"):
+                        evidence.rollout.tool_call_count += 1
+                    elif rtype in ("tool_output", "function_call_output", "result"):
+                        evidence.rollout.tool_output_count += 1
+                        payload_str = str(record.get("output") or record.get("content") or "")
+                        evidence.rollout.tool_output_bytes += len(payload_str)
+                    elif rtype in ("compaction", "context_compaction"):
+                        evidence.rollout.compaction_count += 1
+                        evidence.rollout.lifecycle_events.append({
+                            "event": "compaction",
+                            "ordinal": evidence.rollout.last_ordinal,
+                            "timestamp": ts,
+                        })
+                    elif rtype in ("task_complete", "task_completed", "turn_complete"):
+                        evidence.rollout.lifecycle_events.append({
+                            "event": "task_complete",
+                            "ordinal": evidence.rollout.last_ordinal,
+                            "timestamp": ts,
+                        })
+
+                    rec_str = line.decode("utf-8", errors="ignore")
+                    if "data:image/" in rec_str:
+                        evidence.rollout.inline_image_count += 1
+                        evidence.rollout.inline_image_bytes += len(rec_str)
+
+                    parent = record.get("parent_session_id") or record.get("parent_id")
+                    if parent and not evidence.rollout.parent_id:
+                        evidence.rollout.parent_id = str(parent)
+                    subagent = record.get("subagent_id") or record.get("child_session_id")
+                    if subagent and str(subagent) not in evidence.rollout.subagent_ids:
+                        evidence.rollout.subagent_ids.append(str(subagent))
+
+                    cwd = record.get("cwd") or record.get("working_directory") or record.get("workspace")
+                    if cwd and not evidence.workspace.saved_cwd:
+                        evidence.workspace.saved_cwd = str(cwd)
+                        evidence.workspace.path_family = detect_path_family(str(cwd))
+                        evidence.workspace.accessible = Path(str(cwd)).exists() if evidence.workspace.path_family == "posix" else False
+                        evidence.workspace.translated_path = translate_path(str(cwd))
+                    repo = record.get("repo") or record.get("repository")
+                    if repo and not evidence.workspace.saved_repo:
+                        evidence.workspace.saved_repo = str(repo)
+
+                if lines >= max_scan_lines:
+                    evidence.rollout.is_truncated = True
+                    if "INCOMPLETE_SCAN" not in evidence.findings:
+                        evidence.findings.append("INCOMPLETE_SCAN")
+        except Exception:
+            if "SCAN_READ_ERROR" not in evidence.findings:
+                evidence.findings.append("SCAN_READ_ERROR")
+
+    chome = Path(codex_home).resolve() if codex_home else path.parent.parent
+    db_candidates = [
+        chome / "state.db",
+        chome / "codex.db",
+        chome / "threads.db",
+        path.parent / "state.db",
+    ]
+    for db in db_candidates:
+        if db.exists():
+            evidence.sqlite.present = True
+            evidence.sqlite.db_path = sanitize_path(db)
+            try:
+                conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+                try:
+                    cur = conn.cursor()
+                    cur.execute("PRAGMA integrity_check")
+                    row = cur.fetchone()
+                    evidence.sqlite.integrity_ok = bool(row and row[0] == "ok")
+                    cur.execute("PRAGMA user_version")
+                    uv = cur.fetchone()
+                    if uv:
+                        evidence.sqlite.schema_version = uv[0]
+
+                    for tbl in ("threads", "sessions", "conversations"):
+                        cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tbl}'")
+                        if cur.fetchone():
+                            cur.execute(f"SELECT * FROM {tbl} WHERE id=? OR id LIKE ? LIMIT 1", (session_id, f"%{session_id}%"))
+                            trow = cur.fetchone()
+                            if trow:
+                                evidence.sqlite.thread_found = True
+                                evidence.sqlite.thread_id = str(trow[0])
+                                break
+                finally:
+                    conn.close()
+            except Exception:
+                evidence.sqlite.integrity_ok = False
+            break
+
+    if "SCAN_READ_ERROR" in evidence.findings:
+        evidence.status = "UNREADABLE"
+        evidence.confidence = "LOW"
+    elif "MALFORMED_JSONL" in evidence.findings:
+        evidence.status = "CORRUPT"
+        evidence.confidence = "HIGH"
+    elif "INCOMPLETE_SCAN" in evidence.findings:
+        evidence.status = "INCOMPLETE"
+        evidence.confidence = "MEDIUM"
+    elif evidence.writer.lock_present and evidence.writer.is_alive:
+        evidence.status = "ACTIVE_WRITER"
+        evidence.confidence = "HIGH"
+    elif evidence.findings:
+        evidence.status = "WARNINGS"
+        evidence.confidence = "HIGH"
+    else:
+        evidence.status = "HEALTHY"
+        evidence.confidence = "HIGH"
+
+    return evidence
