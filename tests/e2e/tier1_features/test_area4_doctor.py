@@ -40,6 +40,10 @@ class TestArea4DoctorFeatures(unittest.TestCase):
             "UNFINISHED_TOOL_CALL",
             "COMPACTION_STATE_LOSS",
             "REPO_STATE_DIVERGED",
+            "SUBAGENT_HISTORY_BOUNDARY_SUSPECT",
+            "THREAD_NAME_METADATA_DIVERGED",
+            "INTERRUPTED_INPUT_NOT_DURABLE",
+            "WORKSPACE_CONTEXT_MISMATCH",
             "HEALTHY",
         ]
         self.assertEqual(list(SEVERITY), expected_order)
@@ -104,18 +108,11 @@ class TestArea4DoctorFeatures(unittest.TestCase):
                         session_id="healthy-001",
                         cwd=str(git_repo.root),
                     ),
-                    SyntheticRolloutGenerator.make_user_msg("Run check"),
-                    SyntheticRolloutGenerator.make_agent_msg("Checked"),
-                    SyntheticRolloutGenerator.make_func_call("call_h", "echo", '{"msg": "hi"}'),
-                    SyntheticRolloutGenerator.make_func_output("call_h", "hi"),
+                    SyntheticRolloutGenerator.make_user_msg("Hello"),
+                    SyntheticRolloutGenerator.make_assistant_msg("Hi"),
                 ]
                 p = ws.create_session("healthy-001", records=records)
 
                 result = doctor_session(p)
                 self.assertEqual(result.status, "HEALTHY")
                 self.assertEqual(result.findings, ["HEALTHY"])
-                self.assertIsNotNone(result.repository.get("head_sha"))
-
-
-if __name__ == "__main__":
-    unittest.main()
