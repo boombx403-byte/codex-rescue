@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/alpha5-complete]
+    branches: [main, feat/alpha5-complete, feat/alpha6-product-features]
   pull_request:
     branches: [main]
 

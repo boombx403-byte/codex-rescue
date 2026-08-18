@@ -24,13 +24,13 @@ test('launcher has no runtime downloader, Python bootstrap, or shell execution p
 test('top package uses an explicit content allowlist and no lifecycle scripts', () => {
   assert.deepEqual(top.files.sort(), ['README.md', 'bin/codex-rescue.js'].sort());
   assert.equal(top.scripts, undefined);
-  assert.equal(top.version, '0.1.0-alpha.5');
+  assert.equal(top.version, '0.1.0-alpha.6');
 });
 
 test('platform packages are restricted and script-free', () => {
   for (const directory of platformDirs) {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'npm', 'platforms', directory, 'package.json'), 'utf8'));
-    assert.equal(pkg.version, '0.1.0-alpha.5');
+    assert.equal(pkg.version, '0.1.0-alpha.6');
     assert.equal(pkg.scripts, undefined);
     assert.equal(pkg.os.length, 1);
     assert.equal(pkg.cpu.length, 1);

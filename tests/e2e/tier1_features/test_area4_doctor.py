@@ -28,6 +28,7 @@ class TestArea4DoctorFeatures(unittest.TestCase):
             "MALFORMED_RECORD",
             "TRUNCATED_TRANSCRIPT",
             "OVERSIZED_PAYLOAD",
+            "VALID_BUT_OVERSIZED",
             "INTERLEAVED_WRITERS",
             "INVALID_PERSISTED_ITEM_ID",
             "UNKNOWN_OPERATIONAL_SCHEMA",
