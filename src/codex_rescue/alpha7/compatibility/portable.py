@@ -3,54 +3,83 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
-import shutil
+import sqlite3
+import time
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from codex_rescue.alpha7.compatibility.path_remap import PathRemappingEngine
-from codex_rescue.alpha7.invariants import InvariantCheckResult, InvariantEngine, InvariantStatus
+from codex_rescue.alpha7.graph import PathNamespace, detect_path_namespace
+from codex_rescue.alpha7.invariants import (
+    InvariantCheckResult,
+    InvariantEngine,
+    InvariantEvaluation,
+    InvariantId,
+    InvariantStatus,
+)
 
 
 @dataclass
 class PortableManifest:
-    manifest_version: int = 1
-    session_id: str = ""
-    source_platform: str = ""
-    created_at: float = 0.0
-    schema_version: int = 1
-    rollout_sha256: str = ""
-    rollout_size_bytes: int = 0
-    workspace_path: Optional[str] = None
-    records_count: int = 0
+    package_version: str
+    session_id: str
+    rollout_filename: str
+    rollout_sha256: str
+    rollout_bytes: int
+    created_at: float
+    source_platform: str
+    source_namespace: str
     source_integrity: str = "PROVEN_COMPLETE"
+    records_count: int = 0
+    rollout_schema_version: int = 1
+    archive_state: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        return {
+            "package_version": self.package_version,
+            "session_id": self.session_id,
+            "rollout_filename": self.rollout_filename,
+            "rollout_sha256": self.rollout_sha256,
+            "rollout_bytes": self.rollout_bytes,
+            "created_at": self.created_at,
+            "source_platform": self.source_platform,
+            "source_namespace": self.source_namespace,
+            "source_integrity": self.source_integrity,
+            "records_count": self.records_count,
+            "rollout_schema_version": self.rollout_schema_version,
+            "archive_state": self.archive_state,
+            "metadata": self.metadata,
+        }
 
 
 @dataclass
 class ImportPlan:
     session_id: str
     target_rollout_path: str
-    needs_remapping: bool
-    remapped_workspace: Optional[str]
-    has_conflict: bool
-    conflict_type: Optional[str]
-    is_safe: bool
+    conflict_detected: bool
+    conflict_reason: Optional[str]
+    safe_to_import: bool
+    requires_remapping: bool
     invariants: List[InvariantCheckResult] = field(default_factory=list)
+
+    @property
+    def is_safe(self) -> bool:
+        return self.safe_to_import
+
+    @property
+    def has_conflict(self) -> bool:
+        return self.conflict_detected
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "session_id": self.session_id,
             "target_rollout_path": self.target_rollout_path,
-            "needs_remapping": self.needs_remapping,
-            "remapped_workspace": self.remapped_workspace,
-            "has_conflict": self.has_conflict,
-            "conflict_type": self.conflict_type,
-            "is_safe": self.is_safe,
+            "conflict_detected": self.conflict_detected,
+            "conflict_reason": self.conflict_reason,
+            "safe_to_import": self.safe_to_import,
+            "requires_remapping": self.requires_remapping,
             "invariants": [
                 {"id": i.invariant_id.value, "status": i.status.value, "message": i.message}
                 for i in self.invariants
@@ -59,138 +88,176 @@ class ImportPlan:
 
 
 class PortableSessionEngine:
-    """Exports and imports portable session packages with integrity validation and path remapping."""
+    """Exports and imports portable session packages with integrity, dry-run, and derived state reconstruction."""
 
     @staticmethod
     def export_session(
-        session_file: Path,
-        output_zip: Path,
+        session_path: Path,
+        output_zip_path: Path,
+        metadata: Optional[Dict[str, Any]] = None,
         workspace_path: Optional[str] = None,
+        is_archived: bool = False,
     ) -> PortableManifest:
-        if not session_file.exists():
-            raise FileNotFoundError(f"Session file not found: {session_file}")
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session file not found: {session_path}")
 
-        data = session_file.read_bytes()
+        data = session_path.read_bytes()
         sha = hashlib.sha256(data).hexdigest()
-        size = len(data)
-        sid = session_file.stem
+        session_id = session_path.stem
+        if session_id.startswith("rollout-"):
+            session_id = session_id[8:]
 
         # Count records
-        record_count = sum(1 for line in data.splitlines() if line.strip())
+        records_count = sum(1 for line in data.splitlines() if line.strip())
 
+        meta = dict(metadata or {})
+        if workspace_path:
+            meta["workspace_path"] = workspace_path
+
+        ns = detect_path_namespace(session_path)
         manifest = PortableManifest(
-            manifest_version=1,
-            session_id=sid,
-            source_platform=platform.system(),
-            created_at=float(os.path.getmtime(session_file)),
-            schema_version=1,
+            package_version="1.0",
+            session_id=session_id,
+            rollout_filename=session_path.name,
             rollout_sha256=sha,
-            rollout_size_bytes=size,
-            workspace_path=workspace_path,
-            records_count=record_count,
-            source_integrity="PROVEN_COMPLETE",
+            rollout_bytes=len(data),
+            created_at=time.time(),
+            source_platform=os.name,
+            source_namespace=ns.value,
+            records_count=records_count,
+            archive_state=is_archived,
+            metadata=meta,
         )
 
-        with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        output_zip_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("manifest.json", json.dumps(manifest.to_dict(), indent=2))
-            zf.writestr(f"rollouts/{sid}.jsonl", data)
+            zf.writestr(session_path.name, data)
 
         return manifest
 
     @staticmethod
-    def inspect_package(package_zip: Path) -> PortableManifest:
-        if not package_zip.exists():
-            raise FileNotFoundError(f"Portable package not found: {package_zip}")
+    def inspect_package(package_zip_path: Path) -> PortableManifest:
+        if not package_zip_path.exists():
+            raise FileNotFoundError(f"Package not found: {package_zip_path}")
 
-        with zipfile.ZipFile(package_zip, "r") as zf:
-            if "manifest.json" not in zf.namelist():
-                raise ValueError("Invalid package: missing manifest.json")
-            m_data = json.loads(zf.read("manifest.json").decode("utf-8"))
-            return PortableManifest(**m_data)
+        try:
+            with zipfile.ZipFile(package_zip_path, "r") as zf:
+                if "manifest.json" not in zf.namelist():
+                    raise ValueError("Package missing manifest.json")
+                manifest_data = json.loads(zf.read("manifest.json").decode("utf-8"))
+
+                # Verify payload file exists and matches hash
+                fname = manifest_data["rollout_filename"]
+                if fname not in zf.namelist():
+                    raise ValueError(f"Package missing declared rollout file: {fname}")
+
+                payload = zf.read(fname)
+                calc_sha = hashlib.sha256(payload).hexdigest()
+                if calc_sha != manifest_data["rollout_sha256"]:
+                    raise ValueError("Package integrity check failed: SHA-256 mismatch")
+
+                return PortableManifest(**manifest_data)
+        except zipfile.BadZipFile as e:
+            raise ValueError(f"Corrupt or invalid zip archive: {e}")
 
     @staticmethod
     def plan_import(
-        package_zip: Path,
+        package_zip_path: Path,
         target_codex_home: Path,
-        target_platform: Optional[str] = None,
-        explicit_workspace_remap: Optional[str] = None,
     ) -> ImportPlan:
-        manifest = PortableSessionEngine.inspect_package(package_zip)
-        target_sessions = target_codex_home / "sessions"
-        target_path = target_sessions / f"{manifest.session_id}.jsonl"
+        manifest = PortableSessionEngine.inspect_package(package_zip_path)
+        invariants: List[InvariantCheckResult] = []
 
-        has_conflict = target_path.exists()
-        conflict_type = "EXISTING_SESSION_FILE" if has_conflict else None
-
-        # Check path remapping
-        remapped_ws = None
-        needs_remapping = False
-        plat = target_platform or platform.system()
-
-        if manifest.workspace_path:
-            res = PathRemappingEngine.translate_path(
-                manifest.workspace_path,
-                target_platform=plat,
-                explicit_mappings={manifest.workspace_path: explicit_workspace_remap} if explicit_workspace_remap else None,
-            )
-            remapped_ws = res.target_path
-            needs_remapping = (remapped_ws != manifest.workspace_path)
-
-        invariants = []
-        inv_src = InvariantEngine.check_source_accounting(
-            manifest.rollout_size_bytes, manifest.rollout_size_bytes, 0, 0
+        # Check schema support (INV-007)
+        inv_schema = InvariantEngine.check_schema_support(
+            manifest.rollout_schema_version,
+            {1},
+            is_mutation_operation=True,
         )
-        invariants.append(inv_src)
+        invariants.append(inv_schema)
 
-        is_safe = not has_conflict and all(i.passed for i in invariants)
+        target_dir = (
+            target_codex_home / "archived_sessions"
+            if manifest.archive_state
+            else target_codex_home / "sessions"
+        )
+        target_file = target_dir / manifest.rollout_filename
+
+        conflict = False
+        reason = None
+        if target_file.exists():
+            conflict = True
+            reason = f"Target session file already exists: {target_file}"
+
+        safe = inv_schema.passed and not conflict
 
         return ImportPlan(
             session_id=manifest.session_id,
-            target_rollout_path=str(target_path),
-            needs_remapping=needs_remapping,
-            remapped_workspace=remapped_ws,
-            has_conflict=has_conflict,
-            conflict_type=conflict_type,
-            is_safe=is_safe,
+            target_rollout_path=str(target_file),
+            conflict_detected=conflict,
+            conflict_reason=reason,
+            safe_to_import=safe,
+            requires_remapping=(manifest.source_platform != os.name),
             invariants=invariants,
         )
 
     @staticmethod
     def execute_import(
-        package_zip: Path,
+        package_zip_path: Path,
         target_codex_home: Path,
-        plan: ImportPlan,
+        plan: Optional[ImportPlan] = None,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
-        if not plan.is_safe:
-            return {
-                "success": False,
-                "error": f"Import blocked: {plan.conflict_type or 'Safety check failed'}",
-                "dry_run": dry_run,
-            }
+        rebuild_sqlite_index: bool = True,
+    ) -> Any:
+        active_plan = plan or PortableSessionEngine.plan_import(package_zip_path, target_codex_home)
+        if not active_plan.safe_to_import:
+            return {"success": False, "action": "BLOCKED", "reason": active_plan.conflict_reason}
 
         if dry_run:
-            return {
-                "success": True,
-                "action": "DRY_RUN_PASSED",
-                "target_path": plan.target_rollout_path,
-                "remapped_workspace": plan.remapped_workspace,
-            }
+            return {"success": True, "action": "DRY_RUN_PASSED", "plan": active_plan.to_dict()}
 
-        target_sessions = target_codex_home / "sessions"
-        target_sessions.mkdir(parents=True, exist_ok=True)
-        target_path = Path(plan.target_rollout_path)
+        manifest = PortableSessionEngine.inspect_package(package_zip_path)
+        target_path = Path(active_plan.target_rollout_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(package_zip, "r") as zf:
-            rollout_name = f"rollouts/{plan.session_id}.jsonl"
-            if rollout_name not in zf.namelist():
-                return {"success": False, "error": "Package corrupted: missing rollout file"}
-            data = zf.read(rollout_name)
-            target_path.write_bytes(data)
+        with zipfile.ZipFile(package_zip_path, "r") as zf:
+            payload = zf.read(manifest.rollout_filename)
+            target_path.write_bytes(payload)
+
+        # Reconstruct derived SQLite index in target CODEX_HOME
+        if rebuild_sqlite_index:
+            state_db = target_codex_home / "state_5.sqlite"
+            try:
+                conn = sqlite3.connect(str(state_db), timeout=5.0)
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS threads (
+                            id TEXT PRIMARY KEY,
+                            rollout_path TEXT,
+                            created_at REAL,
+                            updated_at REAL
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (manifest.session_id, str(target_path.resolve()), time.time(), time.time()),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
 
         return {
             "success": True,
             "action": "IMPORTED",
+            "session_id": manifest.session_id,
             "target_path": str(target_path),
-            "session_id": plan.session_id,
         }
