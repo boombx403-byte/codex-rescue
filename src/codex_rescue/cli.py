@@ -274,8 +274,8 @@ def main(argv: list[str] | None = None) -> int:
             return int(ExitCode.SUCCESS if summary.scan_failures == 0 else ExitCode.WARNINGS_FOUND)
 
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
-            print("Error: doctor requires a valid session path or --latest", file=sys.stderr)
+        if session_path is None:
+            print("Error: session path required or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
 
         result = _doctor(session_path, args.oversized_threshold)
@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "diff":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: diff requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         diff_res = diff_session(session_path, codex_home=args.codex_home)
@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "timeline":
         session_path = _resolve_session(args.session, args.latest, None)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: timeline requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         tl_res = build_timeline(session_path, max_events=args.max_events)
@@ -351,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "graph":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: graph requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         g_res = build_session_graph(session_path, codex_home=args.codex_home)
@@ -379,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "workspace":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: workspace requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         ws_res = analyze_workspace(session_path, codex_home=args.codex_home)
@@ -391,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "writer":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: writer requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         wr_res = inspect_writer(session_path, codex_home=args.codex_home)
@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "plan":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: plan requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         p_res = generate_recovery_plan(session_path, codex_home=args.codex_home)
@@ -430,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "bundle":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: bundle requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         try:
@@ -461,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "report":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: report requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         report_file = generate_html_report(session_path, output_html_path=args.output, codex_home=args.codex_home)
@@ -473,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "salvage":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
-        if session_path is None or not Path(session_path).exists():
+        if session_path is None:
             print("Error: salvage requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
         from .doctor import doctor_session

@@ -115,11 +115,6 @@ def generate_recovery_plan(
         plan.preconditions.append("Active writer must be stopped before generating executable repairs.")
         return plan
 
-    if ev.status == "HEALTHY":
-        plan.is_applicable = False
-        plan.refusal_reason = "SESSION_ALREADY_HEALTHY: No repair required."
-        return plan
-
     if "UNINDEXED_SESSION" in ev.findings or (ev.sqlite.present and not ev.sqlite.thread_found):
         plan.derived_state_affected.append("sqlite_thread_inventory")
         plan.preconditions.extend([
@@ -137,6 +132,11 @@ def generate_recovery_plan(
             "Run 'codex-rescue doctor' on session to confirm alignment",
         ])
         plan.is_applicable = True
+        return plan
+
+    if ev.status == "HEALTHY":
+        plan.is_applicable = False
+        plan.refusal_reason = "SESSION_ALREADY_HEALTHY: No repair required."
         return plan
 
     if "TRUNCATED_JSONL" in ev.findings or "MALFORMED_JSONL" in ev.findings:
