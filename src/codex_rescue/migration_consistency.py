@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -30,7 +29,6 @@ class MigrationConsistencyReport:
     boundary_reason: str | None = None
     session_index_name_present: bool | None = None
     session_index_name_length: int | None = None
-    session_index_name_sha256: str | None = None
     sqlite_name_present: bool | None = None
     sqlite_history_mode: str | None = None
     name_metadata_diverged: bool = False
@@ -49,7 +47,6 @@ class MigrationConsistencyReport:
             "boundary_reason": self.boundary_reason,
             "session_index_name_present": self.session_index_name_present,
             "session_index_name_length": self.session_index_name_length,
-            "session_index_name_sha256": self.session_index_name_sha256,
             "sqlite_name_present": self.sqlite_name_present,
             "sqlite_history_mode": self.sqlite_history_mode,
             "name_metadata_diverged": self.name_metadata_diverged,
@@ -103,11 +100,11 @@ def _head_session_meta(source: Path) -> tuple[dict[str, Any], int | None]:
     return (payload if isinstance(payload, dict) else {}), head_ordinal
 
 
-def _read_index_name(root: Path, thread_id: str) -> tuple[bool | None, int | None, str | None]:
+def _read_index_name(root: Path, thread_id: str) -> tuple[bool | None, int | None]:
     index = root / "session_index.jsonl"
     if not index.is_file():
-        return None, None, None
-    matched_name: str | None = None
+        return None, None
+    matched_name_length: int | None = None
     try:
         with index.open("rb") as stream:
             for _ in range(MAX_INDEX_LINES):
@@ -128,13 +125,12 @@ def _read_index_name(root: Path, thread_id: str) -> tuple[bool | None, int | Non
                     continue
                 raw_name = record.get("thread_name")
                 if isinstance(raw_name, str) and raw_name.strip():
-                    matched_name = raw_name.strip()
+                    matched_name_length = len(raw_name.strip())
     except OSError:
-        return None, None, None
-    if matched_name is None:
-        return False, None, None
-    digest = hashlib.sha256(matched_name.encode("utf-8", "surrogatepass")).hexdigest()
-    return True, len(matched_name), digest
+        return None, None
+    if matched_name_length is None:
+        return False, None
+    return True, matched_name_length
 
 
 def _state_db_candidates(root: Path) -> list[Path]:
@@ -224,10 +220,6 @@ def inspect_migration_consistency(
     boundary = head.get("subagent_history_start_ordinal")
     if isinstance(boundary, int) and not isinstance(boundary, bool) and boundary >= 0:
         report.subagent_history_start_ordinal = boundary
-        # The field-reported migrate-rollouts regression has a narrow shape:
-        # a zero-based paginated rewritten rollout whose boundary is stamped at
-        # the exact end-of-file ordinal. Require that exact shape to avoid
-        # generalizing across future/non-contiguous ordinal schemes.
         if (
             parsed.ordinal_mode == "paginated"
             and not parsed.ordinal_tracking_overflow
@@ -244,11 +236,10 @@ def inspect_migration_consistency(
 
     root = _codex_home(source)
     if root is not None and report.thread_id:
-        index_present, index_length, index_hash = _read_index_name(root, report.thread_id)
+        index_present, index_length = _read_index_name(root, report.thread_id)
         sqlite_present, history_mode, state_db = _read_state_name(root, report.thread_id)
         report.session_index_name_present = index_present
         report.session_index_name_length = index_length
-        report.session_index_name_sha256 = index_hash
         report.sqlite_name_present = sqlite_present
         report.sqlite_history_mode = history_mode
         report.state_db = state_db
