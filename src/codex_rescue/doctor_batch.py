@@ -101,7 +101,7 @@ def run_doctor_all(
                 summary.healthy += 1
             elif st in ("UNSUPPORTED", "OPAQUE"):
                 summary.unsupported += 1
-            elif st in ("CORRUPT", "UNKNOWN_CORRUPTION", "UNREADABLE"):
+            elif st in ("CORRUPT", "UNKNOWN_CORRUPTION", "UNREADABLE", "MALFORMED_RECORD", "TRUNCATED_TRANSCRIPT", "CORRUPTED_TOOL_CALL"):
                 summary.scan_failures += 1
             else:
                 summary.warnings_findings += 1
@@ -197,7 +197,7 @@ def run_doctor_changed(
             summary.healthy += 1
         elif st in ("UNSUPPORTED", "OPAQUE"):
             summary.unsupported += 1
-        elif st in ("CORRUPT", "UNKNOWN_CORRUPTION", "UNREADABLE", "SCAN_EXCEPTION"):
+        elif st in ("CORRUPT", "UNKNOWN_CORRUPTION", "UNREADABLE", "SCAN_EXCEPTION", "MALFORMED_RECORD", "TRUNCATED_TRANSCRIPT", "CORRUPTED_TOOL_CALL"):
             summary.scan_failures += 1
         else:
             summary.warnings_findings += 1

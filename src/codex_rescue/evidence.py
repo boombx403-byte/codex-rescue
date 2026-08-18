@@ -197,17 +197,48 @@ def collect_session_evidence(
             with open(path, "rb") as f:
                 lines = 0
                 while lines < max_scan_lines:
-                    line_bytes, _, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
+                    line_bytes, oversized, total_len = _read_line_bounded(f, MAX_RECORD_BYTES)
                     if not line_bytes:
                         break
                     lines += 1
                     evidence.rollout.total_lines += 1
                     evidence.rollout.total_bytes += total_len
+                    complete_line = line_bytes.endswith(b"\n")
+                    if not complete_line:
+                        evidence.rollout.has_trailing_newline = False
+                        evidence.rollout.is_truncated = True
+
+                    has_nul = b"\x00" in line_bytes
+                    if oversized:
+                        if has_nul:
+                            if "MALFORMED_JSONL" not in evidence.findings:
+                                evidence.findings.append("MALFORMED_JSONL")
+                        elif not complete_line:
+                            if "TRUNCATED_JSONL" not in evidence.findings:
+                                evidence.findings.append("TRUNCATED_JSONL")
+                        else:
+                            if "VALID_BUT_OVERSIZED" not in evidence.findings:
+                                evidence.findings.append("VALID_BUT_OVERSIZED")
+                            if "OVERSIZED_PAYLOAD" not in evidence.findings:
+                                evidence.findings.append("OVERSIZED_PAYLOAD")
+                        if "OVERSIZED_RECORD" not in evidence.findings:
+                            evidence.findings.append("OVERSIZED_RECORD")
+                        continue
+
+                    if has_nul:
+                        if "MALFORMED_JSONL" not in evidence.findings:
+                            evidence.findings.append("MALFORMED_JSONL")
+                        continue
+
                     try:
                         record = json.loads(line_bytes.decode("utf-8", errors="ignore"))
                     except Exception:
-                        if "MALFORMED_JSONL" not in evidence.findings:
-                            evidence.findings.append("MALFORMED_JSONL")
+                        if not complete_line:
+                            if "TRUNCATED_JSONL" not in evidence.findings:
+                                evidence.findings.append("TRUNCATED_JSONL")
+                        else:
+                            if "MALFORMED_JSONL" not in evidence.findings:
+                                evidence.findings.append("MALFORMED_JSONL")
                         continue
 
                     rtype = record.get("type") or record.get("event") or "unknown"
@@ -251,6 +282,12 @@ def collect_session_evidence(
                     if "data:image/" in rec_str:
                         evidence.rollout.inline_image_count += 1
                         evidence.rollout.inline_image_bytes += len(rec_str)
+
+                    if total_len > 1_000_000:
+                        if "OVERSIZED_PAYLOAD" not in evidence.findings:
+                            evidence.findings.append("OVERSIZED_PAYLOAD")
+                        if "VALID_BUT_OVERSIZED" not in evidence.findings:
+                            evidence.findings.append("VALID_BUT_OVERSIZED")
 
                     parent = record.get("parent_session_id") or record.get("parent_id")
                     if parent and not evidence.rollout.parent_id:
@@ -320,6 +357,12 @@ def collect_session_evidence(
         evidence.confidence = "LOW"
     elif "MALFORMED_JSONL" in evidence.findings:
         evidence.status = "CORRUPT"
+        evidence.confidence = "HIGH"
+    elif "TRUNCATED_JSONL" in evidence.findings:
+        evidence.status = "CORRUPT"
+        evidence.confidence = "HIGH"
+    elif "OVERSIZED_RECORD" in evidence.findings or "OVERSIZED_PAYLOAD" in evidence.findings or "VALID_BUT_OVERSIZED" in evidence.findings:
+        evidence.status = "OVERSIZED"
         evidence.confidence = "HIGH"
     elif "INCOMPLETE_SCAN" in evidence.findings:
         evidence.status = "INCOMPLETE"

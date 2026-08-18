@@ -59,7 +59,13 @@ def analyze_storage(
 ) -> StorageReport:
     home = Path(codex_home).resolve() if codex_home else Path.home() / ".codex"
     report = StorageReport(
-        size_buckets={"< 100 KB": 0, "100 KB - 1 MB": 0, "1 MB - 10 MB": 0, "> 10 MB": 0}
+        size_buckets={
+            "< 100 KB": 0,
+            "100 KB - 1 MB": 0,
+            "1 MB - 10 MB": 0,
+            "10 MB - 16 MB": 0,
+            "> 16 MB": 0,
+        }
     )
 
     if not home.exists():
@@ -71,6 +77,7 @@ def analyze_storage(
 
     unique_paths = sorted(list({p.resolve() for p in session_files}))[:limit_sessions]
     session_summaries: list[dict[str, Any]] = []
+    oversized_session_count = 0
 
     for path in unique_paths:
         ev = collect_session_evidence(path, codex_home=home, max_scan_lines=5000)
@@ -97,8 +104,17 @@ def analyze_storage(
             report.size_buckets["100 KB - 1 MB"] += 1
         elif ev.size_bytes < 10 * 1024 * 1024:
             report.size_buckets["1 MB - 10 MB"] += 1
+        elif ev.size_bytes < 16 * 1024 * 1024:
+            report.size_buckets["10 MB - 16 MB"] += 1
         else:
-            report.size_buckets["> 10 MB"] += 1
+            report.size_buckets["> 16 MB"] += 1
+
+        if (
+            "OVERSIZED_RECORD" in ev.findings
+            or "OVERSIZED_PAYLOAD" in ev.findings
+            or "VALID_BUT_OVERSIZED" in ev.findings
+        ):
+            oversized_session_count += 1
 
         session_summaries.append({
             "session_id": ev.session_id,
@@ -111,6 +127,10 @@ def analyze_storage(
     session_summaries.sort(key=lambda s: s["size_bytes"], reverse=True)
     report.largest_sessions = session_summaries[:10]
 
+    if oversized_session_count > 0:
+        report.anomalous_growth_indicators.append(
+            f"{oversized_session_count} session(s) contain oversized records exceeding bounded reader thresholds."
+        )
     if report.total_inline_image_bytes > 50 * 1024 * 1024:
         report.anomalous_growth_indicators.append(
             f"High inline image / Data URL footprint: {report.total_inline_image_bytes:,} bytes across {report.total_inline_image_count} images."

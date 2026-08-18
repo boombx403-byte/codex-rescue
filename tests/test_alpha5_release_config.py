@@ -8,9 +8,13 @@ from codex_rescue import __version__
 
 
 ROOT = Path(__file__).resolve().parent.parent
-NPM_VERSION = "0.1.0-alpha.5"
-PYTHON_VERSION = "0.1.0a5"
-TAG = "v0.1.0-alpha.5"
+NPM_VERSION = "0.1.0-alpha.6"
+PYTHON_VERSION = "0.1.0a6"
+TAG = "v0.1.0-alpha.6"
+
+ALPHA5_NPM_VERSION = "0.1.0-alpha.5"
+ALPHA5_PYTHON_VERSION = "0.1.0a5"
+ALPHA5_TAG = "v0.1.0-alpha.5"
 PLATFORM_PACKAGES = {
     "linux-x64": ("codex-rescue-linux-x64", "linux", "x64", "bin/codex-rescue"),
     "win32-x64": ("codex-rescue-win32-x64", "win32", "x64", "bin/codex-rescue.exe"),
@@ -56,9 +60,9 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertIn("actions: read", default_permissions)
         self.assertNotIn("id-token: write", default_permissions)
         self.assertGreaterEqual(text.count("actions: read"), 3)
-        self.assertIn(f"EXPECTED_TAG: {TAG}", text)
-        self.assertIn(f"EXPECTED_PYTHON_VERSION: {PYTHON_VERSION}", text)
-        self.assertIn(f"EXPECTED_NPM_VERSION: {NPM_VERSION}", text)
+        self.assertIn(f"EXPECTED_TAG: {ALPHA5_TAG}", text)
+        self.assertIn(f"EXPECTED_PYTHON_VERSION: {ALPHA5_PYTHON_VERSION}", text)
+        self.assertIn(f"EXPECTED_NPM_VERSION: {ALPHA5_NPM_VERSION}", text)
         self.assertIn("candidate_run_id:", text)
         self.assertIn("candidate run head SHA mismatch", text)
         self.assertIn("GitHub asset digest mismatch", text)
@@ -92,8 +96,8 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertNotIn("\n  pull_request:", trigger)
         self.assertIn("environment:\n      name: pypi", text)
         self.assertIn("id-token: write", text)
-        self.assertIn(f"EXPECTED_TAG: {TAG}", text)
-        self.assertIn(f"EXPECTED_PYTHON_VERSION: {PYTHON_VERSION}", text)
+        self.assertIn(f"EXPECTED_TAG: {ALPHA5_TAG}", text)
+        self.assertIn(f"EXPECTED_PYTHON_VERSION: {ALPHA5_PYTHON_VERSION}", text)
         self.assertIn("candidate_run_id:", text)
         self.assertIn("candidate run head SHA mismatch", text)
         self.assertIn("GitHub asset digest mismatch", text)
@@ -111,7 +115,7 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertIn("contents: read", default_permissions)
         self.assertIn("actions: read", default_permissions)
         self.assertNotIn("id-token: write", default_permissions)
-        self.assertIn(f"EXPECTED_TAG: {TAG}", text)
+        self.assertIn(f"EXPECTED_TAG: {ALPHA5_TAG}", text)
         self.assertIn("PYINSTALLER_VERSION: 6.22.1", text)
         self.assertIn("BUILD_VERSION: 1.5.0", text)
         self.assertIn("TWINE_VERSION: 7.0.0", text)

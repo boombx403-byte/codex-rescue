@@ -126,6 +126,42 @@ EXPLANATIONS: dict[str, FindingExplanation] = {
         risk="MEDIUM: May cause memory pressure or UI lag during playback.",
         safe_next_action="Salvage with truncated payloads or view storage analysis via 'codex-rescue storage'.",
     ),
+    "VALID_BUT_OVERSIZED": FindingExplanation(
+        finding_code="VALID_BUT_OVERSIZED",
+        what_happened="A complete and well-formed record exceeds bounded reader or processing limits (e.g. >16 MiB).",
+        evidence_used="Bounded line scan observed complete record exceeding size limits without syntax or truncation errors.",
+        what_is_still_healthy="Record syntax is intact; prior records remain fully durable and readable.",
+        what_rescue_cannot_know="Whether full in-memory deserialization of the giant payload is needed by downstream tools.",
+        risk="MEDIUM: Processing may exceed memory budgets in downstream tools.",
+        safe_next_action="Use bounded inspection or salvage with omitted heavy payloads.",
+    ),
+    "OVERSIZED_RECORD": FindingExplanation(
+        finding_code="OVERSIZED_RECORD",
+        what_happened="One or more records exceed the bounded reader allocation ceiling.",
+        evidence_used="Line size measurement during streaming bounded scan.",
+        what_is_still_healthy="Durable stream prefix up to the oversized record boundary.",
+        what_rescue_cannot_know="Full in-memory structure without expanding bounded allocation limits.",
+        risk="MEDIUM: Processing bounded stream preserves memory safety.",
+        safe_next_action="Review oversized record offsets and perform bounded inspection.",
+    ),
+    "MALFORMED_RECORD": FindingExplanation(
+        finding_code="MALFORMED_RECORD",
+        what_happened="A record in the rollout failed valid JSON decoding or contained embedded control/NUL corruptions.",
+        evidence_used="Syntax error or NUL byte encountered during record parsing.",
+        what_is_still_healthy="All well-formed records prior to the malformed record.",
+        what_rescue_cannot_know="The intended contents of the corrupted record.",
+        risk="HIGH: Replay engines and UI readers will reject the rollout.",
+        safe_next_action="Salvage durable prefix to a clean fork without modifying original session.",
+    ),
+    "TRUNCATED_TRANSCRIPT": FindingExplanation(
+        finding_code="TRUNCATED_TRANSCRIPT",
+        what_happened="The rollout ended abruptly without a trailing newline or with an incomplete record at EOF.",
+        evidence_used="Unterminated byte sequence at end of file.",
+        what_is_still_healthy="All complete records prior to the truncation point.",
+        what_rescue_cannot_know="Whether in-flight tokens were lost before flush.",
+        risk="MEDIUM: Parsing incomplete tail record fails in strict readers.",
+        safe_next_action="Salvage intact prior records with 'codex-rescue salvage'.",
+    ),
 }
 
 

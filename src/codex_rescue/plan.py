@@ -115,7 +115,23 @@ def generate_recovery_plan(
         plan.preconditions.append("Active writer must be stopped before generating executable repairs.")
         return plan
 
+    if (
+        "INCOMPLETE_SCAN" in ev.findings
+        or "SCAN_READ_ERROR" in ev.findings
+        or "OVERSIZED_RECORD" in ev.findings
+        or "OVERSIZED_PAYLOAD" in ev.findings
+        or "VALID_BUT_OVERSIZED" in ev.findings
+    ):
+        plan.is_applicable = False
+        plan.refusal_reason = f"INCOMPLETE_OR_OVERSIZED_SOURCE: Source rollout contains unparsed or oversized records ({plan.finding}). Refusing mutation to prevent data loss."
+        return plan
+
     if "UNINDEXED_SESSION" in ev.findings or (ev.sqlite.present and not ev.sqlite.thread_found):
+        if ev.status not in ("HEALTHY", "WARNINGS") or "MALFORMED_JSONL" in ev.findings or "TRUNCATED_JSONL" in ev.findings:
+            plan.is_applicable = False
+            plan.refusal_reason = f"SOURCE_NOT_HEALTHY: Rollout has findings '{plan.finding}'. Cannot reindex damaged rollout into SQLite without repair."
+            return plan
+
         plan.derived_state_affected.append("sqlite_thread_inventory")
         plan.preconditions.extend([
             f"Source rollout sha256 matches {sha[:16]}...",
@@ -133,6 +149,31 @@ def generate_recovery_plan(
         ])
         plan.is_applicable = True
         return plan
+
+    if "WEDGED_PROJECTION" in ev.findings or "CURSOR_DIVERGENCE" in ev.findings or (ev.sqlite.projection_cursor is not None and ev.rollout.last_ordinal is not None and ev.sqlite.projection_cursor != ev.rollout.last_ordinal):
+        if ev.status in ("HEALTHY", "WARNINGS") and "MALFORMED_JSONL" not in ev.findings and "TRUNCATED_JSONL" not in ev.findings:
+            plan.derived_state_affected.append("sqlite_projection_cursor")
+            plan.preconditions.extend([
+                f"Source rollout sha256 matches {sha[:16]}...",
+                "SQLite state DB passes PRAGMA integrity_check",
+                "No active writer lock present",
+                "Source rollout contains verified monotonic ordinals",
+            ])
+            plan.proposed_operations.append({
+                "target": "sqlite_state_db",
+                "type": "realign_projection_cursor",
+                "description": f"Update SQLite projection cursor to match canonical rollout boundary ordinal ({ev.rollout.last_ordinal}).",
+            })
+            plan.verify_steps.extend([
+                "Query SQLite projection cursor to confirm match with rollout boundary",
+                "Run 'codex-rescue diff' to verify zero remaining divergences",
+            ])
+            plan.is_applicable = True
+            return plan
+        else:
+            plan.is_applicable = False
+            plan.refusal_reason = f"SOURCE_ROLLOUT_UNSOUND: Canonical rollout has findings '{plan.finding}'. Refusing derived projection update."
+            return plan
 
     if ev.status == "HEALTHY":
         plan.is_applicable = False
