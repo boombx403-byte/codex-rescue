@@ -80,6 +80,19 @@ def apply_recovery_plan(
         )
 
     ev = collect_session_evidence(session_path, codex_home=codex_home)
+    if (
+        "INCOMPLETE_SCAN" in ev.findings
+        or "SCAN_READ_ERROR" in ev.findings
+        or "OVERSIZED_RECORD" in ev.findings
+        or "OVERSIZED_PAYLOAD" in ev.findings
+        or "VALID_BUT_OVERSIZED" in ev.findings
+    ):
+        return ApplyResult(
+            plan_applied=False,
+            dry_run=dry_run,
+            refusal_reason=f"INCOMPLETE_OR_OVERSIZED_SOURCE: Source rollout contains unparsed or oversized records ({', '.join(ev.findings)}). Refusing mutation to prevent data corruption.",
+        )
+
     if ev.writer.lock_present and ev.writer.is_alive:
         return ApplyResult(
             plan_applied=False,
@@ -119,6 +132,23 @@ def apply_recovery_plan(
                         cur.execute("INSERT OR REPLACE INTO threads (id, title, updated_at) VALUES (?, ?, ?)", (session_ref, f"Rescued Session {session_ref[:8]}", int(time.time())))
                         conn.commit()
                         executed_ops.append(f"Reindexed thread {session_ref} in SQLite DB.")
+                finally:
+                    conn.close()
+        elif op_type == "realign_projection_cursor":
+            db_path = Path(ev.sqlite.db_path) if ev.sqlite.db_path else None
+            if db_path and db_path.exists():
+                shutil.copy2(db_path, backup_dir / db_path.name)
+                conn = sqlite3.connect(db_path)
+                try:
+                    cur = conn.cursor()
+                    cur.execute("PRAGMA integrity_check")
+                    if cur.fetchone()[0] != "ok":
+                        raise RuntimeError("SQLite database failed integrity check before mutation")
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_history_projection_state'")
+                    if cur.fetchone():
+                        cur.execute("UPDATE thread_history_projection_state SET projection_cursor = ?, updated_at = ? WHERE thread_id = ?", (ev.rollout.last_ordinal, int(time.time()), session_ref))
+                        conn.commit()
+                        executed_ops.append(f"Realigned SQLite projection cursor for thread {session_ref} to ordinal {ev.rollout.last_ordinal}.")
                 finally:
                     conn.close()
         elif op_type == "create_clean_fork":
