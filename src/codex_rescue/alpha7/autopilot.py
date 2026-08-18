@@ -35,7 +35,7 @@ from codex_rescue.alpha7.surfaces.router import DiagnosticRoute, DiagnosticRoute
 class AutopilotResult:
     topology: EnvironmentTopology
     selected_surface: str
-    action_taken: str  # "INSPECTED", "SIMULATION_PASSED", "REPAIRED", "ROLLED_BACK", "BLOCKED"
+    action_taken: str  # "INSPECTED", "SIMULATION_PASSED", "REPAIRED", "ROLLED_BACK", "BLOCKED", "NO_REPAIRABLE_TARGETS", "MULTIPLE_REPAIR_TARGETS"
     diagnostics: List[DiagnosticRoute] = field(default_factory=list)
     transaction: Optional[TransactionResult] = None
     discovered_sessions_count: int = 0
@@ -74,10 +74,6 @@ class AutopilotEngine:
 
     def prompt_surface_selection(self, available_surfaces: List[str]) -> str:
         """Prompts user interactively on terminal for surface selection."""
-        # Check if stdin is interactive
-        if not sys.stdin.isatty():
-            return "all"
-
         sys.stdout.write("\nCodex Rescue detected multiple Codex surfaces.\n")
         sys.stdout.write("What do you want to inspect?\n")
         sys.stdout.write("  1. CLI\n")
@@ -133,67 +129,125 @@ class AutopilotEngine:
         discovered_sessions, is_trunc = self.desktop_adapter.discover_all_sessions()
         session_count = len(discovered_sessions)
 
-        # 4. Build UnifiedStateGraph
+        # 4. Build UnifiedStateGraph according to requested surface
         graph = UnifiedStateGraph()
         app_client = RealAppServerClient(self.codex_home)
+        app_server_launched = False
 
-        for s_info in discovered_sessions:
-            ns = detect_path_namespace(s_info.path)
-            canon = normalize_canonical_path(s_info.path)
-            node = ThreadNode(
-                identity=ThreadIdentity(
-                    session_id=s_info.session_id,
-                    raw_path=str(s_info.path),
-                    canonical_path=canon,
-                    namespace=ns,
-                    is_archived=s_info.is_archived,
+        if selected_surface in ("all", "app_server"):
+            if app_client.launch_stdio_server():
+                try:
+                    app_client.initialize()
+                    app_server_launched = True
+                except Exception:
+                    app_client.shutdown()
+
+        try:
+            for s_info in discovered_sessions:
+                ns = detect_path_namespace(s_info.path)
+                canon = normalize_canonical_path(s_info.path)
+                node = ThreadNode(
+                    identity=ThreadIdentity(
+                        session_id=s_info.session_id,
+                        raw_path=str(s_info.path),
+                        canonical_path=canon,
+                        namespace=ns,
+                        is_archived=s_info.is_archived,
+                    )
                 )
-            )
 
-            # Record CLI/FS visibility
-            node.surfaces["cli"] = SurfaceObservation(
-                surface="cli",
-                visibility=SurfaceVisibility.VISIBLE if s_info.path.exists() else SurfaceVisibility.HIDDEN,
-                notes=f"Discovered at {s_info.path}",
-            )
+                # CLI / Filesystem probe (runs for cli, desktop, ide, all)
+                node.surfaces["cli"] = SurfaceObservation(
+                    surface="cli",
+                    visibility=SurfaceVisibility.VISIBLE if s_info.path.exists() else SurfaceVisibility.HIDDEN,
+                    notes=f"Discovered at {s_info.path}",
+                )
 
-            # Record Desktop visibility
-            d_diff = self.desktop_adapter.get_session_diff(s_info.session_id)
-            node.surfaces["desktop"] = SurfaceObservation(
-                surface="desktop",
-                visibility=SurfaceVisibility.VISIBLE if d_diff["sqlite_exists"] else SurfaceVisibility.HIDDEN,
-                notes=f"SQLite matches: {len(d_diff['sqlite_matches'])}",
-            )
+                # Desktop probe (runs for desktop and all)
+                if selected_surface in ("desktop", "all"):
+                    d_diff = self.desktop_adapter.get_session_diff(s_info.session_id)
+                    node.surfaces["desktop"] = SurfaceObservation(
+                        surface="desktop",
+                        visibility=SurfaceVisibility.UNKNOWN if d_diff["sqlite_exists"] else SurfaceVisibility.HIDDEN,
+                        notes=f"SQLite matches: {len(d_diff['sqlite_matches'])} (presentation UNKNOWN)",
+                    )
+                else:
+                    node.surfaces["desktop"] = SurfaceObservation(
+                        surface="desktop",
+                        visibility=SurfaceVisibility.UNSUPPORTED,
+                        notes="Surface not selected in routing",
+                    )
 
-            # Record App Server visibility
-            node.surfaces["app_server"] = self.app_server_adapter.observe_thread(
-                s_info.session_id, client=app_client
-            )
+                # App Server probe (runs for app_server and all)
+                if selected_surface in ("app_server", "all"):
+                    node.surfaces["app_server"] = self.app_server_adapter.observe_thread(
+                        s_info.session_id, client=app_client if app_server_launched else None
+                    )
+                else:
+                    node.surfaces["app_server"] = SurfaceObservation(
+                        surface="app_server",
+                        visibility=SurfaceVisibility.UNSUPPORTED,
+                        notes="Surface not selected in routing",
+                    )
 
-            # Record IDE visibility
-            node.surfaces["ide"] = self.ide_adapter.observe_thread(s_info.session_id)
+                # IDE probe (runs for ide and all)
+                if selected_surface in ("ide", "all"):
+                    node.surfaces["ide"] = self.ide_adapter.observe_thread(s_info.session_id)
+                else:
+                    node.surfaces["ide"] = SurfaceObservation(
+                        surface="ide",
+                        visibility=SurfaceVisibility.UNSUPPORTED,
+                        notes="Surface not selected in routing",
+                    )
 
-            graph.add_or_update_node(node)
+                graph.add_or_update_node(node)
+        finally:
+            if app_server_launched:
+                app_client.shutdown()
 
         # 5. Diagnostic Routing
         diagnostics = self.router.evaluate_environment(graph)
 
-        # 6. Transactional Repair if requested
+        # 6. Transactional Repair Target Selection & Execution
         tx_result: Optional[TransactionResult] = None
         action_taken = "INSPECTED"
         invariants: List[InvariantCheckResult] = []
 
-        # Enforce invariant check on flags (INV-009)
         inv_flag = InvariantEngine.check_flags_cannot_bypass_safety(
             yes_flag=False, no_prompt_flag=no_prompt
         )
         invariants.append(inv_flag)
 
-        if repair_safe and session_count > 0:
-            target_to_repair = target_session or discovered_sessions[0].path
-            tx_result = self.repair_engine.execute_derived_index_repair(target_to_repair)
-            action_taken = tx_result.status
-            invariants.extend(tx_result.invariants)
+        if repair_safe:
+            if target_session:
+                tx_result = self.repair_engine.execute_derived_index_repair(target_session)
+                action_taken = tx_result.status
+                invariants.extend(tx_result.invariants)
+            else:
+                # Find sessions with recoverable findings (e.g. absent from SQLite)
+                repairable_sessions = []
+                for s in discovered_sessions:
+                    diff = self.desktop_adapter.get_session_diff(s.session_id)
+                    if not diff["sqlite_exists"]:
+                        repairable_sessions.append(s)
+
+                if not repairable_sessions and session_count > 0:
+                    # If all sessions are in sync or only 1 session exists without target
+                    repairable_sessions = discovered_sessions
+
+                if len(repairable_sessions) == 0:
+                    action_taken = "NO_REPAIRABLE_TARGETS"
+                elif len(repairable_sessions) == 1:
+                    tx_result = self.repair_engine.execute_derived_index_repair(repairable_sessions[0].path)
+                    action_taken = tx_result.status
+                    invariants.extend(tx_result.invariants)
+                elif no_prompt:
+                    action_taken = "MULTIPLE_REPAIR_TARGETS"
+                else:
+                    # Interactive target selection or default to first diagnosed
+                    tx_result = self.repair_engine.execute_derived_index_repair(repairable_sessions[0].path)
+                    action_taken = tx_result.status
+                    invariants.extend(tx_result.invariants)
 
         msg = (
             f"Autopilot analyzed {session_count} sessions across surface '{selected_surface}'"

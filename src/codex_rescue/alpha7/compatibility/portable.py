@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import time
 import zipfile
@@ -18,6 +19,7 @@ from codex_rescue.alpha7.invariants import (
     InvariantId,
     InvariantStatus,
 )
+from codex_rescue.alpha7.simulation.transaction import compute_file_sha256
 
 
 @dataclass
@@ -30,7 +32,7 @@ class PortableManifest:
     created_at: float
     source_platform: str
     source_namespace: str
-    source_integrity: str = "PROVEN_COMPLETE"
+    source_integrity: str = "PROVEN_COMPLETE"  # PROVEN_COMPLETE, VALID_WITH_OVERSIZED_RECORDS, CORRUPTED, TRUNCATED
     records_count: int = 0
     rollout_schema_version: int = 1
     archive_state: bool = False
@@ -88,7 +90,31 @@ class ImportPlan:
 
 
 class PortableSessionEngine:
-    """Exports and imports portable session packages with integrity, dry-run, and derived state reconstruction."""
+    """Exports and imports portable session packages with integrity, streaming I/O, and transactional derived state reconstruction."""
+
+    @staticmethod
+    def evaluate_source_integrity(session_path: Path) -> Tuple[str, int]:
+        """Scans session rollout line by line to determine honest integrity status and record count."""
+        records_count = 0
+        has_malformed = False
+        has_truncated = False
+
+        with session_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                records_count += 1
+                try:
+                    json.loads(line_s)
+                except Exception:
+                    has_malformed = True
+
+        if has_malformed:
+            return "CORRUPTED", records_count
+        if has_truncated:
+            return "TRUNCATED", records_count
+        return "PROVEN_COMPLETE", records_count
 
     @staticmethod
     def export_session(
@@ -101,14 +127,14 @@ class PortableSessionEngine:
         if not session_path.exists():
             raise FileNotFoundError(f"Session file not found: {session_path}")
 
-        data = session_path.read_bytes()
-        sha = hashlib.sha256(data).hexdigest()
+        sha = compute_file_sha256(session_path)
+        file_size = session_path.stat().st_size
         session_id = session_path.stem
         if session_id.startswith("rollout-"):
             session_id = session_id[8:]
 
-        # Count records
-        records_count = sum(1 for line in data.splitlines() if line.strip())
+        # Run source integrity scan
+        source_integrity, records_count = PortableSessionEngine.evaluate_source_integrity(session_path)
 
         meta = dict(metadata or {})
         if workspace_path:
@@ -120,10 +146,11 @@ class PortableSessionEngine:
             session_id=session_id,
             rollout_filename=session_path.name,
             rollout_sha256=sha,
-            rollout_bytes=len(data),
+            rollout_bytes=file_size,
             created_at=time.time(),
             source_platform=os.name,
             source_namespace=ns.value,
+            source_integrity=source_integrity,
             records_count=records_count,
             archive_state=is_archived,
             metadata=meta,
@@ -132,7 +159,7 @@ class PortableSessionEngine:
         output_zip_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("manifest.json", json.dumps(manifest.to_dict(), indent=2))
-            zf.writestr(session_path.name, data)
+            zf.write(session_path, arcname=session_path.name)
 
         return manifest
 
@@ -143,18 +170,36 @@ class PortableSessionEngine:
 
         try:
             with zipfile.ZipFile(package_zip_path, "r") as zf:
+                # 1. Security validation of zip entries
+                for info in zf.infolist():
+                    name = info.filename
+                    if ".." in name or name.startswith("/") or name.startswith("\\"):
+                        raise ValueError(f"Zip path traversal detected: {name}")
+
                 if "manifest.json" not in zf.namelist():
                     raise ValueError("Package missing manifest.json")
+
+                manifest_info = zf.getinfo("manifest.json")
+                if manifest_info.file_size > 1024 * 1024:
+                    raise ValueError("Oversized manifest.json (>1MB)")
+
                 manifest_data = json.loads(zf.read("manifest.json").decode("utf-8"))
 
-                # Verify payload file exists and matches hash
+                # 2. Verify declared payload exists
                 fname = manifest_data["rollout_filename"]
                 if fname not in zf.namelist():
                     raise ValueError(f"Package missing declared rollout file: {fname}")
 
-                payload = zf.read(fname)
-                calc_sha = hashlib.sha256(payload).hexdigest()
-                if calc_sha != manifest_data["rollout_sha256"]:
+                # 3. Stream hash payload to verify integrity without full memory materialization
+                calc_sha = hashlib.sha256()
+                with zf.open(fname) as z_in:
+                    while True:
+                        chunk = z_in.read(65536)
+                        if not chunk:
+                            break
+                        calc_sha.update(chunk)
+
+                if calc_sha.hexdigest() != manifest_data["rollout_sha256"]:
                     raise ValueError("Package integrity check failed: SHA-256 mismatch")
 
                 return PortableManifest(**manifest_data)
@@ -190,7 +235,7 @@ class PortableSessionEngine:
             conflict = True
             reason = f"Target session file already exists: {target_file}"
 
-        safe = inv_schema.passed and not conflict
+        safe = inv_schema.passed and not conflict and manifest.source_integrity == "PROVEN_COMPLETE"
 
         return ImportPlan(
             session_id=manifest.session_id,
@@ -221,39 +266,94 @@ class PortableSessionEngine:
         target_path = Path(active_plan.target_rollout_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(package_zip_path, "r") as zf:
-            payload = zf.read(manifest.rollout_filename)
-            target_path.write_bytes(payload)
+        # 1. Stream write payload to target
+        try:
+            with zipfile.ZipFile(package_zip_path, "r") as zf:
+                with zf.open(manifest.rollout_filename) as src, target_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst, length=65536)
+        except Exception as e:
+            if target_path.exists():
+                try:
+                    target_path.unlink()
+                except Exception:
+                    pass
+            return {"success": False, "action": "ROLLED_BACK", "reason": f"Failed to extract rollout payload: {e}"}
 
-        # Reconstruct derived SQLite index in target CODEX_HOME
+        # 2. Verify extracted file hash
+        extracted_sha = compute_file_sha256(target_path)
+        if extracted_sha != manifest.rollout_sha256:
+            if target_path.exists():
+                try:
+                    target_path.unlink()
+                except Exception:
+                    pass
+            return {"success": False, "action": "ROLLED_BACK", "reason": "Extracted file hash verification failed"}
+
+        # 3. Reconstruct derived SQLite index in target CODEX_HOME
         if rebuild_sqlite_index:
             state_db = target_codex_home / "state_5.sqlite"
             try:
+                state_db.parent.mkdir(parents=True, exist_ok=True)
                 conn = sqlite3.connect(str(state_db), timeout=5.0)
                 try:
                     cur = conn.cursor()
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS threads (
-                            id TEXT PRIMARY KEY,
-                            rollout_path TEXT,
-                            created_at REAL,
-                            updated_at REAL
+                    cur.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name='threads'")
+                    if not cur.fetchone():
+                        cur.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS threads (
+                                id TEXT PRIMARY KEY,
+                                rollout_path TEXT NOT NULL,
+                                created_at INTEGER NOT NULL,
+                                updated_at INTEGER NOT NULL,
+                                source TEXT NOT NULL DEFAULT 'cli',
+                                model_provider TEXT NOT NULL DEFAULT 'openai',
+                                cwd TEXT NOT NULL DEFAULT '',
+                                title TEXT NOT NULL DEFAULT '',
+                                sandbox_policy TEXT NOT NULL DEFAULT 'read-only',
+                                approval_mode TEXT NOT NULL DEFAULT 'auto'
+                            )
+                            """
                         )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (manifest.session_id, str(target_path.resolve()), time.time(), time.time()),
-                    )
+
+                    cur.execute("PRAGMA table_info('threads')")
+                    existing_cols = {r[1]: r for r in cur.fetchall()}
+                    now_ts = int(time.time())
+
+                    row_data = {
+                        "id": manifest.session_id,
+                        "rollout_path": str(target_path.resolve()),
+                        "created_at": now_ts,
+                        "updated_at": now_ts,
+                        "source": "cli",
+                        "model_provider": "openai",
+                        "cwd": str(target_codex_home),
+                        "title": manifest.session_id,
+                        "sandbox_policy": "read-only",
+                        "approval_mode": "auto",
+                    }
+
+                    cols_to_insert = [c for c in row_data if c in existing_cols]
+                    placeholders = ", ".join("?" for _ in cols_to_insert)
+                    col_names = ", ".join(f'"{c}"' for c in cols_to_insert)
+                    values = tuple(row_data[c] for c in cols_to_insert)
+
+                    cur.execute(f"INSERT OR REPLACE INTO threads ({col_names}) VALUES ({placeholders})", values)
                     conn.commit()
                 finally:
                     conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Fail-closed rollback: Remove copied rollout file
+                if target_path.exists():
+                    try:
+                        target_path.unlink()
+                    except Exception:
+                        pass
+                return {
+                    "success": False,
+                    "action": "ROLLED_BACK",
+                    "reason": f"SQLite index reconstruction failed: {e}",
+                }
 
         return {
             "success": True,

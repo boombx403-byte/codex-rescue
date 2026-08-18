@@ -18,6 +18,19 @@ from codex_rescue.alpha7.invariants import (
 )
 from codex_rescue.alpha7.recovery.backup import BackupEngine, BackupManifest
 from codex_rescue.alpha7.simulation.simulator import RepairSimulator, SimulationResult
+from codex_rescue.alpha7.surfaces.desktop import DesktopAdapter, WriterStatus
+
+
+def compute_file_sha256(path: Path) -> str:
+    """Computes SHA-256 hash using streaming 64KB chunks to preserve bounded memory."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
 @dataclass
@@ -49,11 +62,12 @@ class TransactionResult:
 
 
 class TransactionalRepairEngine:
-    """Atomic, reversible repair engine for derived SQLite / projection state."""
+    """Atomic, reversible repair engine for derived SQLite state with real writer guards and streaming hashing."""
 
     def __init__(self, codex_home: Optional[Path] = None):
         self.codex_home = codex_home or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
         self.backup_engine = BackupEngine(self.codex_home / "backups")
+        self.desktop_adapter = DesktopAdapter(self.codex_home)
 
     def execute_derived_index_repair(
         self,
@@ -73,16 +87,35 @@ class TransactionalRepairEngine:
                 message=f"Session file not found: {session_file}",
             )
 
-        # 1. Snapshot precondition & initial source hash
-        source_data_before = session_file.read_bytes()
-        sha_before = hashlib.sha256(source_data_before).hexdigest()
+        # 1. Snapshot precondition & initial source hash via streaming
+        sha_before = compute_file_sha256(session_file)
         session_id = session_file.stem
         if session_id.startswith("rollout-"):
             session_id = session_id[8:]
 
-        # 2. Check active writer precondition (INV-003)
-        inv_writer = InvariantEngine.check_active_writer(
-            has_active_writer=False, writer_pid=None, is_mutation_operation=True
+        # 2. Check active writer precondition (INV-003) - Fail-closed on ACTIVE or UNKNOWN
+        writer_status = self.desktop_adapter.detect_writer_status()
+        if writer_status != WriterStatus.INACTIVE_CONFIRMED:
+            inv_writer = InvariantCheckResult(
+                invariant_id=InvariantId.INV_003,
+                status=InvariantStatus.FAIL,
+                message=f"Mutation blocked: active writer status is {writer_status.value}",
+            )
+            invariants.append(inv_writer)
+            return TransactionResult(
+                operation_id=op_id,
+                status="BLOCKED",
+                initial_source_sha256=sha_before,
+                final_source_sha256=sha_before,
+                source_preserved=True,
+                message=f"Mutation blocked: writer state is {writer_status.value} (fail-closed guard)",
+                invariants=invariants,
+            )
+
+        inv_writer = InvariantCheckResult(
+            invariant_id=InvariantId.INV_003,
+            status=InvariantStatus.PASS,
+            message="No active Codex writer processes detected.",
         )
         invariants.append(inv_writer)
 
@@ -102,7 +135,11 @@ class TransactionalRepairEngine:
 
         # 4. Create Pre-Mutation Backup (INV-005)
         target_db = self.codex_home / state_db_name
-        backup_manifest = self.backup_engine.create_pre_mutation_backup([session_file, target_db], operation_id=op_id)
+        backup_targets = [session_file]
+        if target_db.exists():
+            backup_targets.append(target_db)
+
+        backup_manifest = self.backup_engine.create_pre_mutation_backup(backup_targets, operation_id=op_id)
         if not backup_manifest.verified:
             return TransactionResult(
                 operation_id=op_id,
@@ -115,10 +152,8 @@ class TransactionalRepairEngine:
             )
 
         # 5. Recheck preconditions immediately before mutation (INV-015)
-        current_source_data = session_file.read_bytes()
-        current_sha = hashlib.sha256(current_source_data).hexdigest()
+        current_sha = compute_file_sha256(session_file)
         if current_sha != sha_before:
-            # Source changed between simulation and mutation! Abort per INV-015
             return TransactionResult(
                 operation_id=op_id,
                 status="STALE_PLAN",
@@ -129,6 +164,18 @@ class TransactionalRepairEngine:
                 invariants=invariants,
             )
 
+        writer_recheck = self.desktop_adapter.detect_writer_status()
+        if writer_recheck != WriterStatus.INACTIVE_CONFIRMED:
+            return TransactionResult(
+                operation_id=op_id,
+                status="BLOCKED",
+                initial_source_sha256=sha_before,
+                final_source_sha256=sha_before,
+                source_preserved=True,
+                message="Writer appeared immediately prior to mutation. Aborting.",
+                invariants=invariants,
+            )
+
         # 6. Apply narrow allowlisted mutation (Derived SQLite indexing)
         mutations_applied = 0
         try:
@@ -136,24 +183,48 @@ class TransactionalRepairEngine:
             conn = sqlite3.connect(str(target_db), timeout=5.0)
             try:
                 cur = conn.cursor()
-                # Create table if not present
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS threads (
-                        id TEXT PRIMARY KEY,
-                        rollout_path TEXT,
-                        created_at REAL,
-                        updated_at REAL
+                cur.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name='threads'")
+                if not cur.fetchone():
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS threads (
+                            id TEXT PRIMARY KEY,
+                            rollout_path TEXT NOT NULL,
+                            created_at INTEGER NOT NULL,
+                            updated_at INTEGER NOT NULL,
+                            source TEXT NOT NULL DEFAULT 'cli',
+                            model_provider TEXT NOT NULL DEFAULT 'openai',
+                            cwd TEXT NOT NULL DEFAULT '',
+                            title TEXT NOT NULL DEFAULT '',
+                            sandbox_policy TEXT NOT NULL DEFAULT 'read-only',
+                            approval_mode TEXT NOT NULL DEFAULT 'auto'
+                        )
+                        """
                     )
-                    """
-                )
-                cur.execute(
-                    """
-                    INSERT OR REPLACE INTO threads (id, rollout_path, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (session_id, str(session_file.resolve()), time.time(), time.time()),
-                )
+
+                cur.execute("PRAGMA table_info('threads')")
+                existing_cols = {r[1]: r for r in cur.fetchall()}
+                now_ts = int(time.time())
+
+                row_data = {
+                    "id": session_id,
+                    "rollout_path": str(session_file.resolve()),
+                    "created_at": now_ts,
+                    "updated_at": now_ts,
+                    "source": "cli",
+                    "model_provider": "openai",
+                    "cwd": str(self.codex_home),
+                    "title": session_id,
+                    "sandbox_policy": "read-only",
+                    "approval_mode": "auto",
+                }
+
+                cols_to_insert = [c for c in row_data if c in existing_cols]
+                placeholders = ", ".join("?" for _ in cols_to_insert)
+                col_names = ", ".join(f'"{c}"' for c in cols_to_insert)
+                values = tuple(row_data[c] for c in cols_to_insert)
+
+                cur.execute(f"INSERT OR REPLACE INTO threads ({col_names}) VALUES ({placeholders})", values)
                 conn.commit()
                 mutations_applied = 1
             finally:
@@ -172,14 +243,12 @@ class TransactionalRepairEngine:
                 invariants=invariants,
             )
 
-        # 7. Post-Mutation Verification (INV-002 & INV-008)
-        source_data_after = session_file.read_bytes()
-        sha_after = hashlib.sha256(source_data_after).hexdigest()
+        # 7. Post-Mutation Verification (INV-002 & INV-008) via streaming hash
+        sha_after = compute_file_sha256(session_file)
         inv_immutability = InvariantEngine.check_source_immutability(sha_before, sha_after, is_derived_recovery=True)
         invariants.append(inv_immutability)
 
         if not inv_immutability.passed:
-            # Source was unexpectedly modified! Force immediate rollback
             self.backup_engine.rollback(backup_manifest)
             return TransactionResult(
                 operation_id=op_id,

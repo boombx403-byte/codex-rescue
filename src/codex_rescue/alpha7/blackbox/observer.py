@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import time
@@ -8,48 +9,117 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from codex_rescue.alpha7.blackbox.recorder import BlackBoxRecorder, EventType, StructuralEvent
+from codex_rescue.alpha7.invariants import (
+    InvariantCheckResult,
+    InvariantEngine,
+    InvariantId,
+    InvariantStatus,
+)
+from codex_rescue.alpha7.simulation.transaction import compute_file_sha256
+from codex_rescue.alpha7.surfaces.desktop import DesktopAdapter, WriterStatus
+
+
+@dataclass
+class FileValueSnapshot:
+    path: str
+    size: int
+    mtime: float
+    sha_prefix: str
+
+
+@dataclass
+class ProjectionCursorValue:
+    thread_id: str
+    next_byte_offset: int
+    next_ordinal: int
+    rollout_path: Optional[str]
+    cursor_status: str  # IN_SYNC, CURSOR_STALLED, CURSOR_BEHIND, CURSOR_BEYOND_SOURCE
+
+
+@dataclass
+class ObserverSnapshot:
+    timestamp: float
+    files: Dict[str, FileValueSnapshot] = field(default_factory=dict)
+    cursors: Dict[str, ProjectionCursorValue] = field(default_factory=dict)
+    writer_status: WriterStatus = WriterStatus.UNKNOWN
+    invariants_passed: bool = True
+    invariants: List[InvariantCheckResult] = field(default_factory=list)
 
 
 class StateObserver:
-    """Active observer polling safe local state to generate real Black Box structural events."""
+    """Active observer capturing real structured state values and invariant-backed causal timelines."""
 
     def __init__(self, codex_home: Path, recorder: BlackBoxRecorder):
         self.codex_home = codex_home
         self.recorder = recorder
-        self._last_fs_state: Dict[str, float] = {}
+        self.desktop_adapter = DesktopAdapter(self.codex_home)
+        self._last_fs_state: Dict[str, FileValueSnapshot] = {}
         self._last_db_state: Dict[str, int] = {}
+        self._snapshots: List[ObserverSnapshot] = []
+        self.last_known_good: Optional[float] = None
+        self.first_known_bad: Optional[float] = None
         self.poll_count = 0
 
     def poll_once(self) -> List[StructuralEvent]:
-        """Performs one observation sweep across filesystem and SQLite state."""
+        """Performs one observation sweep across filesystem, SQLite state values, and projection cursors."""
         events: List[StructuralEvent] = []
+        now = time.time()
         self.poll_count += 1
 
-        # 1. Observe filesystem session rollouts
+        # 1. Observe filesystem session rollouts with exact size, mtime, and sha_prefix
         sessions_dir = self.codex_home / "sessions"
-        current_fs_state: Dict[str, float] = {}
-        if sessions_dir.exists():
-            for p in sessions_dir.rglob("*.jsonl"):
+        archived_dir = self.codex_home / "archived_sessions"
+        current_fs_state: Dict[str, FileValueSnapshot] = {}
+
+        for sdir in [sessions_dir, archived_dir]:
+            if not sdir.exists():
+                continue
+            for p in sdir.rglob("*.jsonl"):
                 try:
-                    current_fs_state[str(p)] = p.stat().st_mtime
+                    stat = p.stat()
+                    sha_prefix = compute_file_sha256(p)[:16]
+                    current_fs_state[str(p)] = FileValueSnapshot(
+                        path=str(p),
+                        size=stat.st_size,
+                        mtime=stat.st_mtime,
+                        sha_prefix=sha_prefix,
+                    )
                 except OSError:
                     continue
 
         # Detect additions & modifications
-        for p_str, mtime in current_fs_state.items():
+        for p_str, snap in current_fs_state.items():
             sid = Path(p_str).stem
+            if sid.startswith("rollout-"):
+                sid = sid[8:]
+
             if p_str not in self._last_fs_state:
                 e = self.recorder.record_event(
                     EventType.ROLLOUT_CREATED,
                     session_id=sid,
-                    details={"path": p_str, "mtime": mtime, "source": "OBSERVED"},
+                    details={
+                        "path": p_str,
+                        "size": snap.size,
+                        "mtime": snap.mtime,
+                        "sha_prefix": snap.sha_prefix,
+                        "source": "OBSERVED",
+                    },
                 )
                 events.append(e)
-            elif mtime > self._last_fs_state[p_str]:
+            elif (
+                snap.size != self._last_fs_state[p_str].size
+                or snap.sha_prefix != self._last_fs_state[p_str].sha_prefix
+            ):
                 e = self.recorder.record_event(
                     EventType.ROLLOUT_APPENDED,
                     session_id=sid,
-                    details={"path": p_str, "mtime": mtime, "source": "OBSERVED"},
+                    details={
+                        "path": p_str,
+                        "size": snap.size,
+                        "old_size": self._last_fs_state[p_str].size,
+                        "sha_prefix": snap.sha_prefix,
+                        "source": "OBSERVED",
+                    },
                 )
                 events.append(e)
 
@@ -66,8 +136,10 @@ class StateObserver:
 
         self._last_fs_state = current_fs_state
 
-        # 2. Observe SQLite state databases
+        # 2. Observe SQLite state databases and projection cursor values
         current_db_state: Dict[str, int] = {}
+        cursors: Dict[str, ProjectionCursorValue] = {}
+
         for db_name in ("state_5.sqlite", "state.db", "codex.db"):
             db_path = self.codex_home / db_name
             if not db_path.exists() or db_path.stat().st_size == 0:
@@ -81,11 +153,30 @@ class StateObserver:
                     cur = conn.cursor()
                     cur.execute("SELECT name FROM sqlite_schema WHERE type='table'")
                     tables = [str(r[0]) for r in cur.fetchall()]
+
                     for t in tables:
                         if t in ("threads", "thread_history_projection_state", "session_index"):
                             cur.execute(f"SELECT count(*) FROM \"{t}\"")
                             cnt = int(cur.fetchone()[0])
                             current_db_state[f"{db_name}:{t}"] = cnt
+
+                        # Value-level projection cursor inspection
+                        if t == "thread_history_projection_state":
+                            cur.execute("PRAGMA table_info('thread_history_projection_state')")
+                            cols = {str(r[1]) for r in cur.fetchall()}
+                            if "thread_id" in cols and "next_rollout_byte_offset" in cols:
+                                cur.execute("SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal FROM thread_history_projection_state")
+                                for r in cur.fetchall():
+                                    tid = str(r[0])
+                                    byte_off = int(r[1])
+                                    ord_val = int(r[2]) if len(r) > 2 and r[2] is not None else 0
+                                    cursors[tid] = ProjectionCursorValue(
+                                        thread_id=tid,
+                                        next_byte_offset=byte_off,
+                                        next_ordinal=ord_val,
+                                        rollout_path=None,
+                                        cursor_status="IN_SYNC",
+                                    )
                 finally:
                     conn.close()
             except Exception:
@@ -106,4 +197,33 @@ class StateObserver:
                 events.append(e)
 
         self._last_db_state = current_db_state
+
+        # 3. Detect Writer Status
+        writer_status = self.desktop_adapter.detect_writer_status()
+
+        # 4. Invariant Evaluation & Timeline Analysis
+        invariants: List[InvariantCheckResult] = []
+        inv_writer = InvariantEngine.check_active_writer(
+            has_active_writer=(writer_status == WriterStatus.ACTIVE_CONFIRMED),
+            writer_pid=None,
+            is_mutation_operation=False,
+        )
+        invariants.append(inv_writer)
+
+        all_passed = all(i.passed for i in invariants)
+        snapshot = ObserverSnapshot(
+            timestamp=now,
+            files=current_fs_state,
+            cursors=cursors,
+            writer_status=writer_status,
+            invariants_passed=all_passed,
+            invariants=invariants,
+        )
+        self._snapshots.append(snapshot)
+
+        if all_passed:
+            self.last_known_good = now
+        elif self.first_known_bad is None:
+            self.first_known_bad = now
+
         return events

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import contextlib
+import os
+import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -11,18 +15,27 @@ from codex_rescue.alpha7.simulation.simulator import RepairSimulator
 from codex_rescue.cli import main
 
 
+@contextlib.contextmanager
+def safe_temp_codex_home():
+    td = tempfile.mkdtemp()
+    try:
+        yield Path(td)
+    finally:
+        if os.name == "nt":
+            time.sleep(0.2)
+        shutil.rmtree(td, ignore_errors=True)
+
+
 class AutopilotAndCLITests(unittest.TestCase):
     def test_autopilot_engine_run(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             engine = AutopilotEngine(chome)
             res = engine.run_autopilot(surface="all")
             self.assertEqual(res.selected_surface, "all")
             self.assertEqual(res.action_taken, "INSPECTED")
 
     def test_repair_simulator(self):
-        with tempfile.TemporaryDirectory() as td:
-            tmp = Path(td)
+        with safe_temp_codex_home() as tmp:
             rollout = tmp / "session_sim.jsonl"
             rollout.write_text('{"turn":1}\n', encoding="utf-8")
 
@@ -43,14 +56,13 @@ class AutopilotAndCLITests(unittest.TestCase):
         self.assertIn("Privacy validation: PASS", share_report)
 
     def test_self_test_engine(self):
-        with tempfile.TemporaryDirectory() as td:
-            rep = SelfTestEngine.run_self_test(Path(td))
+        with safe_temp_codex_home() as td:
+            rep = SelfTestEngine.run_self_test(td)
             self.assertEqual(rep.overall_status, "PASS")
             self.assertEqual(rep.passed_checks, rep.total_checks)
 
     def test_cli_dispatches(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             # 1. auto
             code_auto = main(["auto", "--codex-home", str(chome), "--json"])
             self.assertEqual(code_auto, 0)

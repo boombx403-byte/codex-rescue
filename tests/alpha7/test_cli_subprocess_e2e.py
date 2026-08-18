@@ -1,14 +1,28 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 SRC_DIR = str(Path(__file__).resolve().parent.parent.parent / "src")
+
+
+@contextlib.contextmanager
+def safe_temp_codex_home():
+    td = tempfile.mkdtemp()
+    try:
+        yield Path(td)
+    finally:
+        if os.name == "nt":
+            time.sleep(0.2)
+        shutil.rmtree(td, ignore_errors=True)
 
 
 class CliSubprocessE2ETests(unittest.TestCase):
@@ -20,8 +34,7 @@ class CliSubprocessE2ETests(unittest.TestCase):
         return env
 
     def test_cli_auto_no_args_subprocess(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             env = self._make_env(chome)
 
             cmd = [sys.executable, "-m", "codex_rescue", "auto", "--json", "--codex-home", str(chome)]
@@ -36,9 +49,35 @@ class CliSubprocessE2ETests(unittest.TestCase):
             data = json.loads(proc.stdout)
             self.assertEqual(data["data"]["action_taken"], "INSPECTED")
 
+    def test_cli_auto_surface_flag_explicit(self):
+        with safe_temp_codex_home() as chome:
+            env = self._make_env(chome)
+
+            for surf in ["cli", "desktop", "ide", "all"]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "codex_rescue",
+                    "auto",
+                    "--surface",
+                    surf,
+                    "--json",
+                    "--codex-home",
+                    str(chome),
+                ]
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=5.0,
+                )
+                self.assertEqual(proc.returncode, 0, f"Stderr for {surf}: {proc.stderr}")
+                data = json.loads(proc.stdout)
+                self.assertEqual(data["data"]["selected_surface"], surf)
+
     def test_cli_self_test_subprocess(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             env = self._make_env(chome)
             cmd = [sys.executable, "-m", "codex_rescue", "self-test", "--json", "--codex-home", str(chome)]
             proc = subprocess.run(
@@ -53,8 +92,7 @@ class CliSubprocessE2ETests(unittest.TestCase):
             self.assertEqual(data["data"]["overall_status"], "PASS")
 
     def test_cli_interactive_surface_selector_simulated(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             env = self._make_env(chome)
             sdir = chome / "sessions"
             sdir.mkdir(parents=True)
@@ -78,8 +116,7 @@ class CliSubprocessE2ETests(unittest.TestCase):
             self.assertIn("Autopilot", proc.stdout)
 
     def test_cli_repair_safe_subprocess(self):
-        with tempfile.TemporaryDirectory() as td:
-            chome = Path(td)
+        with safe_temp_codex_home() as chome:
             env = self._make_env(chome)
             sdir = chome / "sessions"
             sdir.mkdir(parents=True)
