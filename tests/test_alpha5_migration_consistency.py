@@ -130,11 +130,12 @@ class Alpha5MigrationConsistencyTests(unittest.TestCase):
             self.assertTrue(report.session_index_name_present)
             self.assertFalse(report.sqlite_name_present)
             self.assertEqual(report.session_index_name_length, len("private synthetic name"))
-            self.assertIsNotNone(report.session_index_name_sha256)
+            self.assertFalse(hasattr(report, "session_index_name_sha256"))
             diagnosis = doctor_session(path)
             self.assertIn("THREAD_NAME_METADATA_DIVERGED", diagnosis.findings)
             serialized = diagnosis.to_dict()["migration_consistency"]
             self.assertNotIn("private synthetic name", json.dumps(serialized))
+            self.assertNotIn("sha256", json.dumps(serialized).lower())
 
     def test_sqlite_name_present_does_not_flag_divergence(self):
         with tempfile.TemporaryDirectory() as directory:
