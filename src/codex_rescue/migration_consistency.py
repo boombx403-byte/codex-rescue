@@ -23,6 +23,7 @@ class MigrationConsistencyReport:
     status: str = "not_applicable"
     findings: list[str] = field(default_factory=list)
     thread_id: str | None = None
+    head_ordinal: int | None = None
     subagent_history_start_ordinal: int | None = None
     valid_record_count: int = 0
     subagent_boundary_suspect: bool = False
@@ -41,6 +42,7 @@ class MigrationConsistencyReport:
             "status": self.status,
             "findings": self.findings,
             "thread_id": self.thread_id,
+            "head_ordinal": self.head_ordinal,
             "subagent_history_start_ordinal": self.subagent_history_start_ordinal,
             "valid_record_count": self.valid_record_count,
             "subagent_boundary_suspect": self.subagent_boundary_suspect,
@@ -75,24 +77,30 @@ def _thread_id(parsed: ParseResult, source: Path) -> str | None:
     return match.group(1) if match else None
 
 
-def _head_session_meta(source: Path) -> dict[str, Any]:
+def _head_session_meta(source: Path) -> tuple[dict[str, Any], int | None]:
     try:
         with source.open("rb") as stream:
             line, oversized, _ = _read_line_bounded(
                 stream, max_bytes=MAX_RECORD_BYTES, digest=None
             )
     except OSError:
-        return {}
+        return {}, None
     if not line or oversized:
-        return {}
+        return {}, None
     try:
         record = json.loads(line)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return {}
+        return {}, None
     if not isinstance(record, dict) or record.get("type") != "session_meta":
-        return {}
+        return {}, None
+    raw_ordinal = record.get("ordinal")
+    head_ordinal = (
+        raw_ordinal
+        if isinstance(raw_ordinal, int) and not isinstance(raw_ordinal, bool) and raw_ordinal >= 0
+        else None
+    )
     payload = record.get("payload")
-    return payload if isinstance(payload, dict) else {}
+    return (payload if isinstance(payload, dict) else {}), head_ordinal
 
 
 def _read_index_name(root: Path, thread_id: str) -> tuple[bool | None, int | None, str | None]:
@@ -210,20 +218,26 @@ def inspect_migration_consistency(
     source = Path(path).expanduser().resolve()
     report = MigrationConsistencyReport(valid_record_count=parsed.valid_record_count)
     report.thread_id = _thread_id(parsed, source)
-    head = _head_session_meta(source)
+    head, head_ordinal = _head_session_meta(source)
+    report.head_ordinal = head_ordinal
 
     boundary = head.get("subagent_history_start_ordinal")
     if isinstance(boundary, int) and not isinstance(boundary, bool) and boundary >= 0:
         report.subagent_history_start_ordinal = boundary
-        # Field-reported migrate-rollouts bug stamps the boundary at EOF.  A
-        # boundary equal to or beyond the number of durable records means no
-        # existing record can be visible from that boundary in the common
-        # zero-based paginated shape. Keep this a projection-suspect finding,
-        # not a data-loss claim: the raw rollout may still be intact.
-        if parsed.valid_record_count > 1 and boundary >= parsed.valid_record_count:
+        # The field-reported migrate-rollouts regression has a narrow shape:
+        # a zero-based paginated rewritten rollout whose boundary is stamped at
+        # the exact end-of-file ordinal. Require that exact shape to avoid
+        # generalizing across future/non-contiguous ordinal schemes.
+        if (
+            parsed.ordinal_mode == "paginated"
+            and not parsed.ordinal_tracking_overflow
+            and head_ordinal == 0
+            and parsed.valid_record_count > 1
+            and boundary == parsed.valid_record_count
+        ):
             report.subagent_boundary_suspect = True
             report.boundary_reason = (
-                "subagent history boundary is at or beyond the durable record count; "
+                "subagent history boundary equals the end-of-file ordinal in a zero-based paginated rollout; "
                 "raw history may exist while derived thread presentation is empty"
             )
             report.findings.append("SUBAGENT_HISTORY_BOUNDARY_SUSPECT")
