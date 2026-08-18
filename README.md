@@ -250,3 +250,95 @@ Do **not** publish raw:
 - private repository paths or thread names;
 - inline images/base64 media;
 - encrypted/opaque payloads.
+
+Sanitize evidence before opening a public issue.
+
+## JSON output
+
+`sessions`, `doctor`, `salvage`, and `verify` support JSON where the CLI exposes `--json`. CLI JSON is wrapped in:
+
+```json
+{
+  "schema_version": 1,
+  "data": {}
+}
+```
+
+`doctor` includes transcript evidence plus Alpha5 aggregate diagnostics, projection status, schema-compatibility counts, bounded field evidence, workspace portability, migration consistency, and repository evidence classification. Unknown schema reporting aggregates type/count information and does not dump the unknown payload body. Thread-name consistency evidence does not emit the raw legacy name or a name digest.
+
+Consumers should treat unknown fields/statuses as forward-compatible data, not as permission to assume health.
+
+## Large-rollout behavior
+
+The canonical parser and Alpha5 scan are sequential and bounded-memory rather than whole-file JSON loads. Oversized physical JSONL records are drained in bounded chunks; Alpha5 does not base64-decode media just to diagnose size pressure.
+
+Alpha5 can expose aggregate information such as:
+
+- total rollout size from filesystem metadata/parser output;
+- largest physical record observed;
+- bounded-record overflow count;
+- inline media indicators observed in the bounded record prefix;
+- compaction record count.
+
+Limits are deliberate. A record too large to parse within the bounded record window is not fully semantically inspected. Correlation/ordinal state also has explicit caps; overflow reduces confidence instead of producing false `HEALTHY`.
+
+Alpha5 currently performs an additional bounded linear scan for these aggregates, so very large rollouts incur additional sequential I/O even though memory stays bounded. The August 18 hardening reuses the parser's bounded retained event window and bounded metadata reads; it does not add a third full-rollout scan.
+
+## Known limitations
+
+- Release qualification is exact-SHA: a later commit is unqualified until its required Actions complete successfully.
+- npm registry-name availability is time-sensitive and rechecked immediately before publication; authenticated publisher identity/rights are also verified at publish time.
+- Ordinary PR CI does not publish Alpha5 packages, create a tag, or merge a PR.
+- Projection parity only applies when a stable thread identity, paginated rollout evidence, supported session root, readable compatible state, and trustworthy byte boundary are available.
+- A missing projection DB is not a defect. A malformed/ambiguous projection store fails closed rather than being repaired.
+- Discovery is bounded to supported rollout roots and immediate Codex-home database candidates; it is not an arbitrary whole-disk crawler.
+- Inventory scanning is bounded; Rescue does not claim to reconstruct every undocumented future Codex DB schema.
+- The migrated-subagent boundary detector recognizes only the exact reported zero-based paginated EOF-boundary shape. Other/future ordinal schemes remain unclassified.
+- Thread-name divergence requires a readable local `session_index.jsonl` and compatible paginated SQLite thread metadata; missing stores remain unknown/not-applicable.
+- Interrupted-input detection is limited to the parser's bounded retained event window; absence of the finding does not prove every historical prompt was durably persisted.
+- Workspace portability is evidence, not automatic migration; Rescue does not rewrite `/mnt/<drive>` or Windows-native paths.
+- Interleaved-writer detection requires explicit persisted writer identity evidence and deliberately avoids treating ordinary subagent concurrency as corruption.
+- Persisted lifecycle records cannot prove current live process/agent state.
+- Opaque/encrypted content is never decrypted; format labels are diagnostic only and do not prove an account/key root cause.
+- An absent persisted tool output does not prove the tool did not execute.
+- Rescue does not fix upstream Codex networking, remote compaction, Desktop UI/renderer, app-server locking, process lifecycle, API, cross-platform state migration, or service bugs.
+- No in-place SQLite repair is provided in Alpha5.
+
+## npm ↔ Python version mapping
+
+| Distribution surface | Alpha5 version |
+|---|---|
+| Python implementation/build version | `0.1.0a5` (not a PyPI Alpha5 channel) |
+| npm top/platform packages | `0.1.0-alpha.5` |
+| Intended GitHub tag | `v0.1.0-alpha.5` |
+
+The Alpha5 tag is `v0.1.0-alpha.5` and remains bound to the qualified release
+source. Do not move or recreate it.
+
+## Development/testing
+
+Source development:
+
+```bash
+python -m pip install -e .
+python -m compileall -q src tests scripts
+python -m unittest discover -s tests -v
+python tests/e2e/harness_e2e.py --tier all
+node --test npm/tests/*.test.cjs
+```
+
+Python package qualification:
+
+```bash
+python -m pip install build twine
+python -m build
+python -m twine check dist/*
+```
+
+Native/npm builds are intentionally delegated to `.github/workflows/alpha5-native-npm.yml`. That workflow builds PyInstaller one-file executables, smoke-tests them, records SHA256, assembles platform npm packages, runs `npm pack`, audits tarball allowlists, installs local tarballs with lifecycle scripts disabled, runs version/help/doctor smoke checks, and compares structured JSON semantics across Python/native/npm paths.
+
+Do not replace CI evidence with a claim that workflow configuration alone proves a target works.
+
+## License
+
+Distributed under the [MIT License](LICENSE). Copyright (c) 2026 shleder.
