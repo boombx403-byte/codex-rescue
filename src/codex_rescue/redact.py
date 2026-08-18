@@ -10,8 +10,8 @@ SECRET_PATTERNS = [
     (re.compile(r"(?i)(sk-[a-zA-Z0-9]{20,})"), "[REDACTED_API_KEY]"),
     (re.compile(r"(?i)(gh[opusr]_[a-zA-Z0-9]{20,})"), "[REDACTED_GITHUB_TOKEN]"),
     (re.compile(r"(?i)(eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})"), "[REDACTED_JWT]"),
-    (re.compile(r"(?i)(api[_-]?key\s*[:=]\s*['"][a-zA-Z0-9_\-]{16,}['"])"), "[REDACTED_API_KEY]"),
-    (re.compile(r"(?i)(password\s*[:=]\s*['"][^\s'"]{6,}['"])"), "[REDACTED_PASSWORD]"),
+    (re.compile(r"""(?i)(api[_-]?key\s*[:=]\s*['"][a-zA-Z0-9_\-]{16,}['"])"""), "[REDACTED_API_KEY]"),
+    (re.compile(r"""(?i)(password\s*[:=]\s*['"][^\s'"]{6,}['"])"""), "[REDACTED_PASSWORD]"),
     (re.compile(r"(?i)(cookie\s*:\s*[^\r\n]+)"), "[REDACTED_COOKIE]"),
     (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "[REDACTED_EMAIL]"),
 ]
