@@ -108,11 +108,18 @@ class TestArea4DoctorFeatures(unittest.TestCase):
                         session_id="healthy-001",
                         cwd=str(git_repo.root),
                     ),
-                    SyntheticRolloutGenerator.make_user_msg("Hello"),
-                    SyntheticRolloutGenerator.make_assistant_msg("Hi"),
+                    SyntheticRolloutGenerator.make_user_msg("Run check"),
+                    SyntheticRolloutGenerator.make_agent_msg("Checked"),
+                    SyntheticRolloutGenerator.make_func_call("call_h", "echo", '{"msg": "hi"}'),
+                    SyntheticRolloutGenerator.make_func_output("call_h", "hi"),
                 ]
                 p = ws.create_session("healthy-001", records=records)
 
                 result = doctor_session(p)
                 self.assertEqual(result.status, "HEALTHY")
                 self.assertEqual(result.findings, ["HEALTHY"])
+                self.assertIsNotNone(result.repository.get("head_sha"))
+
+
+if __name__ == "__main__":
+    unittest.main()
