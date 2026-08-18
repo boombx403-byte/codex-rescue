@@ -40,6 +40,10 @@ class TestArea4DoctorFeatures(unittest.TestCase):
             "UNFINISHED_TOOL_CALL",
             "COMPACTION_STATE_LOSS",
             "REPO_STATE_DIVERGED",
+            "SUBAGENT_HISTORY_BOUNDARY_SUSPECT",
+            "THREAD_NAME_METADATA_DIVERGED",
+            "INTERRUPTED_INPUT_NOT_DURABLE",
+            "WORKSPACE_CONTEXT_MISMATCH",
             "HEALTHY",
         ]
         self.assertEqual(list(SEVERITY), expected_order)

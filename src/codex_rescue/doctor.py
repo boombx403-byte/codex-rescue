@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from .alpha5 import Alpha5RolloutDiagnostics, ProjectionReport, scan_rollout_alpha5
+from .field_evidence import (
+    FieldEvidenceReport,
+    WorkspacePortabilityReport,
+    analyze_field_evidence,
+    inspect_workspace_portability,
+)
 from .gitstate import GitStateError, inspect_git_state
+from .migration_consistency import MigrationConsistencyReport, inspect_migration_consistency
 from .projection import inspect_projection_parity
 from .schema_compat import SchemaCompatibilityReport, apply_schema_compatibility
 from .transcript import ParseResult, parse_transcript
@@ -29,6 +36,10 @@ SEVERITY = [
     "UNFINISHED_TOOL_CALL",
     "COMPACTION_STATE_LOSS",
     "REPO_STATE_DIVERGED",
+    "SUBAGENT_HISTORY_BOUNDARY_SUSPECT",
+    "THREAD_NAME_METADATA_DIVERGED",
+    "INTERRUPTED_INPUT_NOT_DURABLE",
+    "WORKSPACE_CONTEXT_MISMATCH",
     "HEALTHY",
 ]
 
@@ -43,6 +54,9 @@ class DoctorResult:
     alpha5: Alpha5RolloutDiagnostics
     projection: ProjectionReport
     schema_compatibility: SchemaCompatibilityReport
+    field_evidence: FieldEvidenceReport
+    workspace_portability: WorkspacePortabilityReport
+    migration_consistency: MigrationConsistencyReport
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +68,9 @@ class DoctorResult:
             "alpha5": self.alpha5.to_dict(),
             "projection": self.projection.to_dict(),
             "schema_compatibility": self.schema_compatibility.to_dict(),
+            "field_evidence": self.field_evidence.to_dict(),
+            "workspace_portability": self.workspace_portability.to_dict(),
+            "migration_consistency": self.migration_consistency.to_dict(),
         }
 
 
@@ -72,6 +89,8 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     parsed = parse_transcript(path, oversized_threshold=oversized_threshold)
     schema_compatibility = apply_schema_compatibility(parsed)
     alpha5 = scan_rollout_alpha5(path)
+    field_evidence = analyze_field_evidence(parsed)
+    migration_consistency = inspect_migration_consistency(path, parsed)
     projection = inspect_projection_parity(path, parsed)
     findings: set[str] = set()
     if parsed.corruption_class:
@@ -102,6 +121,10 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     if alpha5.malformed_opaque_field_count:
         findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
 
+    if field_evidence.interrupted_input_boundary_count:
+        findings.add("INTERRUPTED_INPUT_NOT_DURABLE")
+    findings.update(migration_consistency.findings)
+
     if projection.status == "wedged":
         findings.add("WEDGED_PROJECTION")
     elif projection.status == "active_write":
@@ -110,6 +133,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         findings.add("PROJECTION_STATE_UNKNOWN")
 
     cwd = parsed.session_metadata.get("cwd")
+    workspace_portability = inspect_workspace_portability(cwd)
     repository: dict[str, Any]
     if cwd:
         try:
@@ -124,6 +148,16 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
             }
     else:
         repository = {"cwd": None, "confidence": "unknown", "classification": "no_workspace"}
+    repository["workspace_portability"] = workspace_portability.to_dict()
+
+    if (
+        workspace_portability.mismatch
+        and repository.get("classification") in {
+            "inaccessible_repository",
+            "git_unavailable_or_repository_inaccessible",
+        }
+    ):
+        findings.add("WORKSPACE_CONTEXT_MISMATCH")
 
     if not findings:
         findings.add("HEALTHY")
@@ -137,4 +171,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         alpha5,
         projection,
         schema_compatibility,
+        field_evidence,
+        workspace_portability,
+        migration_consistency,
     )

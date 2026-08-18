@@ -76,13 +76,30 @@ class Alpha5ReleaseConfigTests(unittest.TestCase):
         self.assertIn("publish-npm-meta:", text)
         self.assertIn("needs: publish-npm-platforms", text)
 
-    def test_alpha5_publish_policy_is_npm_only(self) -> None:
+    def test_alpha5_publish_policy_is_coordinated(self) -> None:
         handoff = (ROOT / "docs/alpha5-release-handoff.md").read_text(encoding="utf-8")
-        self.assertIn("PYPI_ALPHA5_POLICY: NOT_PUBLISHED", handoff)
+        self.assertIn("PYPI_ALPHA5_POLICY: OFFICIAL_RELEASE_CHANNEL", handoff)
         self.assertIn("GitHub Release / standalone native binaries", handoff)
         self.assertIn("npx codex-rescue@0.1.0-alpha.5", handoff)
-        self.assertNotIn("PyPI exposes exactly `codex-rescue==0.1.0a5`", handoff)
-        self.assertNotIn("pipx install codex-rescue==0.1.0a5", handoff)
+        self.assertIn("pip install codex-rescue==0.1.0a5", handoff)
+        self.assertIn("pipx install codex-rescue==0.1.0a5", handoff)
+
+    def test_alpha5_pypi_publish_workflow_is_manual_exact_and_trusted(self) -> None:
+        text = (ROOT / ".github/workflows/alpha5-publish-pypi.yml").read_text(encoding="utf-8")
+        trigger = text.split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", trigger)
+        self.assertNotIn("\n  push:", trigger)
+        self.assertNotIn("\n  pull_request:", trigger)
+        self.assertIn("environment:\n      name: pypi", text)
+        self.assertIn("id-token: write", text)
+        self.assertIn(f"EXPECTED_TAG: {TAG}", text)
+        self.assertIn(f"EXPECTED_PYTHON_VERSION: {PYTHON_VERSION}", text)
+        self.assertIn("candidate_run_id:", text)
+        self.assertIn("candidate run head SHA mismatch", text)
+        self.assertIn("GitHub asset digest mismatch", text)
+        self.assertIn("pypa/gh-action-pypi-publish", text)
+        self.assertIn("twine check", text)
+        self.assertIn("PYPI_ALPHA5_STATE=NOT_FOUND", text)
 
     def test_release_candidate_is_manual_and_requires_exact_artifact_set(self) -> None:
         text = (ROOT / ".github/workflows/alpha5-release-candidate.yml").read_text(encoding="utf-8")
