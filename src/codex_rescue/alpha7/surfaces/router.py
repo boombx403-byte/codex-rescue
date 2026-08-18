@@ -137,3 +137,13 @@ class DiagnosticRouter:
                 pass
 
         return route
+
+    def evaluate_environment(self, graph: UnifiedStateGraph) -> List[DiagnosticRoute]:
+        """Evaluates all threads in graph and generates diagnostic routes."""
+        routes: List[DiagnosticRoute] = []
+        for node in graph.nodes.values():
+            r = self.route_session(node.identity.thread_id)
+            if node.has_cross_surface_divergence:
+                r.findings.append("CROSS_SURFACE_VISIBILITY_DIVERGENCE")
+            routes.append(r)
+        return routes

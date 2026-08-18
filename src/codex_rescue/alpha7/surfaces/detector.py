@@ -78,6 +78,8 @@ class SurfaceDetector:
 
         return topo
 
+    detect_all_surfaces = detect_topology
+
     @staticmethod
     def _detect_cli(home: Path) -> DetectedSurface:
         # CLI presence: ~/.codex/sessions or ~/.codex/history.jsonl or cli binary
