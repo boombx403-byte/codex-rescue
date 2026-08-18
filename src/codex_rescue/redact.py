@@ -12,15 +12,14 @@ SECRET_PATTERNS = [
     (re.compile(r"(?i)(eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})"), "[REDACTED_JWT]"),
     (re.compile(r"(?i)(api[_-]?key\s*[:=]\s*['"][a-zA-Z0-9_\-]{16,}['"])"), "[REDACTED_API_KEY]"),
     (re.compile(r"(?i)(password\s*[:=]\s*['"][^\s'"]{6,}['"])"), "[REDACTED_PASSWORD]"),
-    (re.compile(r"(?i)(cookie\s*:\s*[^
-]+)"), "[REDACTED_COOKIE]"),
+    (re.compile(r"(?i)(cookie\s*:\s*[^\r\n]+)"), "[REDACTED_COOKIE]"),
     (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "[REDACTED_EMAIL]"),
 ]
 
 PATH_PATTERNS = [
     (re.compile(r"/Users/[a-zA-Z0-9_\-\.]+"), "~"),
     (re.compile(r"/home/[a-zA-Z0-9_\-\.]+"), "~"),
-    (re.compile(r"(?i)[a-z]:\users\[a-zA-Z0-9_\-\.]+"), "~"),
+    (re.compile(r"(?i)[a-z]:\\users\\[a-zA-Z0-9_\-\.]+"), "~"),
 ]
 
 
@@ -38,7 +37,7 @@ def redact_text(text: str) -> str:
 def sanitize_path(path_str: str | Path) -> str:
     if not path_str:
         return ""
-    p = str(path_str).replace("\", "/")
+    p = str(path_str).replace("\\", "/")
     user = os.environ.get("USER") or os.environ.get("USERNAME")
     if user and user in p:
         p = p.replace(f"/home/{user}", "~").replace(f"/Users/{user}", "~")

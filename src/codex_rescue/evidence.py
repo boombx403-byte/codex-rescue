@@ -103,11 +103,11 @@ def translate_path(p: str) -> str | None:
     fam = detect_path_family(p)
     if fam == "wsl":
         drive = p[5].upper()
-        rest = p[6:].replace("/", "\")
+        rest = p[6:].replace("/", "\\")
         return f"{drive}:{rest}"
     elif fam == "windows":
         drive = p[0].lower()
-        rest = p[2:].replace("\", "/")
+        rest = p[2:].replace("\\", "/")
         return f"/mnt/{drive}{rest}"
     return None
 
