@@ -66,13 +66,17 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_batch_doctor_all_and_changed(self):
         s1 = self.home / "sessions" / "session_1.jsonl"
-        s1.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-" + json.dumps({"type": "task_complete", "ordinal": 2}) + "
-", encoding="utf-8")
+        s1.write_text(
+            json.dumps({"type": "turn_started", "ordinal": 1}) + "\n" +
+            json.dumps({"type": "task_complete", "ordinal": 2}) + "\n",
+            encoding="utf-8",
+        )
 
         s2 = self.home / "archived_sessions" / "session_2.jsonl"
-        s2.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-", encoding="utf-8")
+        s2.write_text(
+            json.dumps({"type": "turn_started", "ordinal": 1}) + "\n",
+            encoding="utf-8",
+        )
 
         summary = run_doctor_all(self.home)
         self.assertEqual(summary.sessions_scanned, 2)
@@ -97,15 +101,11 @@ class Alpha6FeatureTests(unittest.TestCase):
     def test_diff_and_timeline(self):
         s_path = self.home / "sessions" / "diff_test.jsonl"
         s_path.write_text(
-            json.dumps({"type": "turn_started", "ordinal": 1, "timestamp": "2026-08-18T10:00:00Z"}) + "
-" +
-            json.dumps({"type": "tool_call", "name": "shell", "ordinal": 2, "timestamp": "2026-08-18T10:00:01Z"}) + "
-" +
-            json.dumps({"type": "tool_output", "name": "shell", "output": "ok", "ordinal": 3, "timestamp": "2026-08-18T10:00:02Z"}) + "
-" +
-            json.dumps({"type": "task_complete", "ordinal": 4, "timestamp": "2026-08-18T10:00:03Z"}) + "
-",
-            encoding="utf-8"
+            json.dumps({"type": "turn_started", "ordinal": 1, "timestamp": "2026-08-18T10:00:00Z"}) + "\n" +
+            json.dumps({"type": "tool_call", "name": "shell", "ordinal": 2, "timestamp": "2026-08-18T10:00:01Z"}) + "\n" +
+            json.dumps({"type": "tool_output", "name": "shell", "output": "ok", "ordinal": 3, "timestamp": "2026-08-18T10:00:02Z"}) + "\n" +
+            json.dumps({"type": "task_complete", "ordinal": 4, "timestamp": "2026-08-18T10:00:03Z"}) + "\n",
+            encoding="utf-8",
         )
 
         diff = diff_session(s_path, codex_home=self.home)
@@ -119,13 +119,11 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_graph_and_storage(self):
         parent = self.home / "sessions" / "parent_session.jsonl"
-        parent.write_text(json.dumps({"type": "turn_started", "subagent_id": "child_subagent_1"}) + "
-", encoding="utf-8")
+        parent.write_text(json.dumps({"type": "turn_started", "subagent_id": "child_subagent_1"}) + "\n", encoding="utf-8")
 
         (self.home / "sessions" / "subagents").mkdir(parents=True, exist_ok=True)
         child = self.home / "sessions" / "subagents" / "child_subagent_1.jsonl"
-        child.write_text(json.dumps({"type": "turn_started", "parent_session_id": "parent_session"}) + "
-", encoding="utf-8")
+        child.write_text(json.dumps({"type": "turn_started", "parent_session_id": "parent_session"}) + "\n", encoding="utf-8")
 
         graph = build_session_graph(parent, codex_home=self.home)
         self.assertEqual(graph.root_session_id, "parent_session")
@@ -137,8 +135,7 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_schema_and_workspace(self):
         s_path = self.home / "sessions" / "ws_test.jsonl"
-        s_path.write_text(json.dumps({"type": "turn_started", "cwd": "/mnt/c/Users/tester/repo"}) + "
-", encoding="utf-8")
+        s_path.write_text(json.dumps({"type": "turn_started", "cwd": "/mnt/c/Users/tester/repo"}) + "\n", encoding="utf-8")
 
         schema_rep = inspect_schemas(self.home, [s_path])
         self.assertTrue(schema_rep.schema_coverage_pct > 0)
@@ -149,8 +146,7 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_writer_inspector_and_read_only(self):
         s_path = self.home / "sessions" / "writer_test.jsonl"
-        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-", encoding="utf-8")
+        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n", encoding="utf-8")
 
         lock_path = self.home / "sessions" / "writer_test.lock"
         lock_path.write_text(str(os.getpid()), encoding="utf-8")
@@ -163,8 +159,7 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_recovery_plan_and_apply_safety_gates(self):
         s_path = self.home / "sessions" / "unindexed_test.jsonl"
-        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-", encoding="utf-8")
+        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n", encoding="utf-8")
 
         db_path = self.home / "state.db"
         conn = sqlite3.connect(db_path)
@@ -188,8 +183,7 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_support_bundle_redaction_and_report(self):
         s_path = self.home / "sessions" / "bundle_test.jsonl"
-        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-", encoding="utf-8")
+        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "\n", encoding="utf-8")
 
         bundle_out = Path(self.tmp_dir.name) / "bundle.json"
         bundle_obj, path_str = generate_support_bundle(s_path, output_bundle_path=bundle_out, codex_home=self.home)
@@ -205,20 +199,20 @@ class Alpha6FeatureTests(unittest.TestCase):
 
     def test_session_filters(self):
         s1 = self.home / "sessions" / "dup_1.jsonl"
-        s1.write_text(json.dumps({"type": "turn_started"}) + "
-", encoding="utf-8")
+        s1.write_text(json.dumps({"type": "turn_started"}) + "\n", encoding="utf-8")
         s2 = self.home / "archived_sessions" / "dup_1.jsonl"
-        s2.write_text(json.dumps({"type": "turn_started"}) + "
-", encoding="utf-8")
+        s2.write_text(json.dumps({"type": "turn_started"}) + "\n", encoding="utf-8")
 
         dups = filter_sessions(self.home, duplicates=True)
         self.assertTrue(len(dups) >= 2)
 
     def test_cli_exit_codes_and_json(self):
         s_path = self.home / "sessions" / "cli_test.jsonl"
-        s_path.write_text(json.dumps({"type": "turn_started", "ordinal": 1}) + "
-" + json.dumps({"type": "task_complete", "ordinal": 2}) + "
-", encoding="utf-8")
+        s_path.write_text(
+            json.dumps({"type": "turn_started", "ordinal": 1}) + "\n" +
+            json.dumps({"type": "task_complete", "ordinal": 2}) + "\n",
+            encoding="utf-8",
+        )
 
         code = main(["doctor", str(s_path), "--json", "--codex-home", str(self.home)])
         self.assertEqual(code, int(ExitCode.SUCCESS))
