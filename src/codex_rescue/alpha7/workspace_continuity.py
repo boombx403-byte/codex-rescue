@@ -93,6 +93,10 @@ class WorkspaceContinuityEngine:
                 return GitMetadata(is_git_repository=False)
 
             repo_root = res_toplevel.stdout.strip()
+            if not Path(repo_root).is_absolute():
+                repo_root = str((target_dir / repo_root).resolve())
+            else:
+                repo_root = str(Path(repo_root).resolve())
         except Exception as e:
             return GitMetadata(is_git_repository=False, error=str(e))
 
@@ -109,7 +113,10 @@ class WorkspaceContinuityEngine:
             )
             if res_commondir.returncode == 0:
                 raw_common = res_commondir.stdout.strip()
-                common_dir = str(Path(raw_common).resolve()) if raw_common else None
+                if raw_common:
+                    p_common = Path(raw_common)
+                    common_dir = str((target_dir / p_common).resolve() if not p_common.is_absolute() else p_common.resolve())
+
                 git_dir_res = subprocess.run(
                     ["git", "-C", str(target_dir), "rev-parse", "--git-dir"],
                     capture_output=True,
@@ -119,9 +126,11 @@ class WorkspaceContinuityEngine:
                 )
                 if git_dir_res.returncode == 0:
                     raw_git_dir = git_dir_res.stdout.strip()
-                    git_dir_resolved = str(Path(raw_git_dir).resolve())
-                    if common_dir and git_dir_resolved != common_dir:
-                        is_worktree = True
+                    if raw_git_dir:
+                        p_git_dir = Path(raw_git_dir)
+                        git_dir_resolved = str((target_dir / p_git_dir).resolve() if not p_git_dir.is_absolute() else p_git_dir.resolve())
+                        if common_dir and git_dir_resolved != common_dir:
+                            is_worktree = True
         except Exception:
             pass
 

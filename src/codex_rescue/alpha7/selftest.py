@@ -19,7 +19,6 @@ import enum
 
 
 class TrustVerdict(str, enum.Enum):
-    VERIFIED = "VERIFIED"
     VERIFIED_WITH_LIMITATIONS = "VERIFIED_WITH_LIMITATIONS"
     READ_ONLY_ONLY = "READ_ONLY_ONLY"
     BLOCKED = "BLOCKED"
@@ -55,7 +54,17 @@ class SelfTestReport:
     invariant_engine_status: str = "PASS"
     overall_status: str = "LIMITED"  # PASS, LIMITED, DEGRADED, FAIL
     trust_verdict: str = TrustVerdict.VERIFIED_WITH_LIMITATIONS.value
-    trust_reason: str = "Rescue core runtime verified; environment operates in read-only diagnostic mode."
+    trust_reason: str = "Rescue core runtime verified; read-only operations supported; mutation remains HOLD."
+    capabilities: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "diagnostics_read_only": True,
+            "portable_export": True,
+            "backup": True,
+            "salvage": True,
+            "live_app_server_observation": False,
+            "mutation": "HOLD",
+        }
+    )
     total_checks: int = 0
     passed_checks: int = 0
     failed_checks: int = 0
@@ -66,6 +75,7 @@ class SelfTestReport:
             "overall_status": self.overall_status,
             "trust_verdict": self.trust_verdict,
             "trust_reason": self.trust_reason,
+            "capabilities": self.capabilities,
             "rescue_runtime_status": self.rescue_runtime_status,
             "codex_binary_status": self.codex_binary_status,
             "codex_home_status": self.codex_home_status,
@@ -216,18 +226,24 @@ class SelfTestEngine:
             report.overall_status = "FAIL"
             report.trust_verdict = TrustVerdict.BLOCKED.value
             report.trust_reason = "Internal Rescue runtime verification failed; operations blocked."
+            report.capabilities["diagnostics_read_only"] = False
+            report.capabilities["portable_export"] = False
+            report.capabilities["backup"] = False
+            report.capabilities["salvage"] = False
         elif report.codex_state_status == "CORRUPT" or report.app_server_status == "FAILED":
             report.overall_status = "DEGRADED"
             report.trust_verdict = TrustVerdict.READ_ONLY_ONLY.value
-            report.trust_reason = "Codex environment state is degraded; only read-only diagnosis permitted."
+            report.trust_reason = "Codex environment state is degraded; only read-only diagnosis permitted; mutation remains HOLD."
         elif report.codex_binary_status == "PASS" and (report.codex_state_status == "PASS" or report.app_server_status == "PASS"):
             report.overall_status = "PASS"
-            report.trust_verdict = TrustVerdict.VERIFIED.value
-            report.trust_reason = "Full Codex environment and Rescue runtime verified."
+            report.trust_verdict = TrustVerdict.VERIFIED_WITH_LIMITATIONS.value
+            report.trust_reason = "Full Codex environment and Rescue runtime verified; read-only operations supported; mutation remains HOLD."
+            if report.app_server_status == "PASS":
+                report.capabilities["live_app_server_observation"] = True
         else:
             # Clean Rescue runtime but empty/missing Codex state
             report.overall_status = "LIMITED"
             report.trust_verdict = TrustVerdict.VERIFIED_WITH_LIMITATIONS.value
-            report.trust_reason = "Rescue core runtime verified; active Codex environment not fully populated."
+            report.trust_reason = "Rescue core runtime verified; active Codex environment not fully populated; mutation remains HOLD."
 
         return report

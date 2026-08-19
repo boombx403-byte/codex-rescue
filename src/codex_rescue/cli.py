@@ -331,14 +331,15 @@ def main(argv: list[str] | None = None) -> int:
         from .alpha7.compatibility.engine import CompatibilityEngine
         comp = CompatibilityEngine.evaluate(args.rollout_schema, args.sqlite_schema)
         if getattr(args, "json", False):
-            _json(comp.to_dict(), command="compatibility", status="ALLOWED" if comp.mutation_allowed else "DISABLED")
+            _json(comp.to_dict(), command="compatibility", status=comp.verdict)
         else:
-            print(f"Schema Compatibility: {'ALLOWED' if comp.mutation_allowed else 'DISABLED'}")
-            print(f"Rollout schema {comp.rollout_schema_version}: {'SUPPORTED' if comp.rollout_schema_supported else 'UNKNOWN'}")
-            print(f"SQLite schema {comp.sqlite_schema_version}: {'SUPPORTED' if comp.sqlite_schema_supported else 'UNKNOWN'}")
+            print(f"Schema Verdict: {comp.verdict}")
+            print(f"Rollout schema {comp.rollout_schema_version}: {'SUPPORTED' if comp.rollout_schema_known else 'UNKNOWN'}")
+            print(f"SQLite schema {comp.sqlite_schema_version}: {'SUPPORTED' if comp.sqlite_schema_known else 'UNKNOWN'}")
+            print(f"Mutation Allowed: {comp.mutation_allowed} ({comp.mutation_hold_reason})")
             if comp.rejection_reason:
                 print(f"Reason: {comp.rejection_reason}")
-        return int(ExitCode.SUCCESS if comp.mutation_allowed else ExitCode.INCOMPLETE_OR_UNSUPPORTED)
+        return int(ExitCode.SUCCESS if comp.verdict != "UNSUPPORTED" else ExitCode.INCOMPLETE_OR_UNSUPPORTED)
 
     if args.command == "portable":
         from .alpha7.compatibility.portable import PortableSessionEngine

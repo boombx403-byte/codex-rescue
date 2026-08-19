@@ -122,7 +122,7 @@ class CliSubprocessE2ETests(unittest.TestCase):
             env = self._make_env(chome)
             sdir = chome / "sessions"
             sdir.mkdir(parents=True)
-            sess = sdir / "s_repair.jsonl"
+            sess = sdir / "rollout-2026-08-19T12-00-00-11111111-2222-3333-4444-555555555555.jsonl"
             sess.write_text('{"turn":1, "prompt": "repair me"}\n', encoding="utf-8")
 
             # Create valid state_5.sqlite with threads table
