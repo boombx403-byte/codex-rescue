@@ -23,7 +23,7 @@ class MutationNegativeAndRollbackTests(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         self.codex_home = Path(self.td.name)
         (self.codex_home / "sessions").mkdir(parents=True, exist_ok=True)
-        self.session_file = self.codex_home / "sessions" / "rollout-2026-08-18T10-00-00-000Z.jsonl"
+        self.session_file = self.codex_home / "sessions" / "rollout-2026-08-18T10-00-00-11111111-2222-3333-4444-555555555555.jsonl"
         self.session_file.write_text('{"turn": 1, "type": "session_meta"}\n', encoding="utf-8")
 
     def tearDown(self):
@@ -100,7 +100,7 @@ class MutationNegativeAndRollbackTests(unittest.TestCase):
         conn = sqlite3.connect(str(state_db))
         conn.execute(
             "INSERT INTO threads (id, rollout_path, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            ("2026-08-18T10-00-00-000Z", "/existing/path.jsonl", 1000, 1000),
+            ("11111111-2222-3333-4444-555555555555", "/existing/path.jsonl", 1000, 1000),
         )
         conn.commit()
         conn.close()
@@ -140,7 +140,7 @@ class MutationNegativeAndRollbackTests(unittest.TestCase):
             # Check DB row
             conn = sqlite3.connect(str(state_db))
             cur = conn.cursor()
-            cur.execute("SELECT rollout_path FROM threads WHERE id = ?", ("2026-08-18T10-00-00-000Z",))
+            cur.execute("SELECT rollout_path FROM threads WHERE id = ?", ("11111111-2222-3333-4444-555555555555",))
             row = cur.fetchone()
             self.assertIsNotNone(row)
             self.assertEqual(Path(row[0]).resolve(), self.session_file.resolve())

@@ -328,8 +328,8 @@ class PortableSessionEngine:
 
         manifest = PortableSessionEngine.inspect_package(package_zip_path)
         
-        # Staging path in Rescue staging area or target if stage_only requested
-        staging_dir = target_codex_home / ".rescue_staging" if not stage_only else Path(active_plan.target_rollout_path).parent
+        # Staging path in Rescue staging area
+        staging_dir = target_codex_home / ".rescue_staging"
         staging_dir.mkdir(parents=True, exist_ok=True)
         staged_target = staging_dir / manifest.rollout_filename
 

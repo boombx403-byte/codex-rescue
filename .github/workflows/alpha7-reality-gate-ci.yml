@@ -16,13 +16,13 @@ concurrency:
 
 jobs:
   reality-gate:
-    name: Alpha7 Gate (${{ matrix.os }}, py${{ matrix.python-version }})
+    name: Alpha7 Qualification (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest, macos-15]
+        python-version: ["3.11", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -32,16 +32,35 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install test & build dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest build
+          python -m pip install build
 
-      - name: Run Alpha7 Reality Gate Test Suite
+      - name: Python Compileall
         run: |
-          pytest tests/alpha7/ -v
+          python -m compileall -q src tests scripts
+
+      - name: Main Python Test Suite
+        run: |
+          python -m unittest discover -s tests -v
         env:
           PYTHONPATH: src
+
+      - name: Alpha7 Laboratory Test Suite
+        run: |
+          python -m unittest discover -s tests/alpha7 -v
+        env:
+          PYTHONPATH: src
+
+      - name: NPM Launcher and Package Tests
+        run: |
+          node --test npm/tests/*.test.cjs
 
       - name: Build Wheel and Source Distribution
         run: |
@@ -64,7 +83,10 @@ jobs:
                   py_bin = venv_dir / 'bin' / 'python'
                   cli_bin = venv_dir / 'bin' / 'codex-rescue'
 
-              whl_file = list(Path('dist').glob('*.whl'))[0]
+              whl_files = list(Path('dist').glob('*.whl'))
+              if not whl_files:
+                  raise RuntimeError('No wheel built')
+              whl_file = whl_files[0]
               print('Installing wheel:', whl_file)
               subprocess.run([str(py_bin), '-m', 'pip', 'install', str(whl_file.resolve())], check=True)
               
@@ -76,3 +98,4 @@ jobs:
               res_st = subprocess.run([str(cli_bin), 'self-test', '--json'], capture_output=True, text=True, check=True)
               print('Self-test exit code:', res_st.returncode)
           "
+

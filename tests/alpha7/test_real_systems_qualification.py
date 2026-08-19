@@ -153,7 +153,8 @@ while True:
         with safe_temp_codex_home() as chome:
             sdir = chome / "sessions"
             sdir.mkdir(parents=True)
-            sess = sdir / "session_tx.jsonl"
+            sess_uuid = "44444444-5555-6666-7777-888888888888"
+            sess = sdir / f"rollout-2026-08-19T12-00-00-{sess_uuid}.jsonl"
             sess.write_text('{"turn": 1, "prompt": "test"}\n', encoding="utf-8")
 
             # Setup valid state_5.sqlite
@@ -197,13 +198,14 @@ while True:
             self.assertEqual(len(evs), 0)
             self.assertIsNotNone(observer.last_known_good)
 
-            # Add session file
-            f1 = sdir / "sess1.jsonl"
+            # Add session file with canonical identity
+            sess_uuid = "55555555-6666-7777-8888-999999999999"
+            f1 = sdir / f"rollout-2026-08-19T12-00-00-{sess_uuid}.jsonl"
             f1.write_text('{"turn":1}\n', encoding="utf-8")
 
             evs2 = observer.poll_once()
             self.assertEqual(len(evs2), 1)
-            self.assertEqual(evs2[0].session_id, "sess1")
+            self.assertEqual(evs2[0].session_id, sess_uuid)
 
     def test_portable_roundtrip_with_derived_reconstruction(self):
         with safe_temp_codex_home() as td:
@@ -212,32 +214,41 @@ while True:
             src_sdir = src_home / "sessions"
             src_sdir.mkdir(parents=True)
 
-            sess_file = src_sdir / "s_export.jsonl"
+            sess_uuid = "77777777-8888-9999-0000-111111111111"
+            sess_file = src_sdir / f"rollout-2026-08-19T12-00-00-{sess_uuid}.jsonl"
             sess_file.write_text('{"turn": 1, "text": "hello"}\n', encoding="utf-8")
 
             zip_path = td / "exported.rescue.zip"
 
             # 1. Export
             manifest = PortableSessionEngine.export_session(sess_file, zip_path)
-            self.assertEqual(manifest.session_id, "s_export")
+            self.assertEqual(manifest.session_id, sess_uuid)
+            self.assertEqual(manifest.thread_id, sess_uuid)
+            self.assertEqual(manifest.identity_status, "RESOLVED")
             self.assertEqual(manifest.source_integrity, "HEALTHY")
 
             # 2. Inspect
             inspected = PortableSessionEngine.inspect_package(zip_path)
             self.assertEqual(inspected.rollout_sha256, manifest.rollout_sha256)
 
-            # 3. Plan & Import into isolated target
+            # 3. Plan & Import staging into isolated target
             plan = PortableSessionEngine.plan_import(zip_path, tgt_home)
             self.assertTrue(plan.safe_to_import)
 
-            res = PortableSessionEngine.execute_import(zip_path, tgt_home)
-            self.assertTrue(res["success"])
-            self.assertEqual(res["action"], "SOURCE_IMPORTED_DERIVED_STATE_NOT_REBUILT")
+            # Stage only
+            res_stage = PortableSessionEngine.execute_import(zip_path, tgt_home, stage_only=True)
+            self.assertTrue(res_stage["success"])
+            self.assertEqual(res_stage["stage"], "STAGED")
 
-            # 4. Verify target state
-            tgt_file = tgt_home / "sessions" / "s_export.jsonl"
-            self.assertTrue(tgt_file.exists())
-            self.assertEqual(tgt_file.read_text(encoding="utf-8"), sess_file.read_text(encoding="utf-8"))
+            # Live import fails closed without supported registration path
+            res_live = PortableSessionEngine.execute_import(zip_path, tgt_home, stage_only=False)
+            self.assertFalse(res_live["success"])
+            self.assertEqual(res_live["action"], "IMPORT_BLOCKED")
+
+            # 4. Verify target state in staging area
+            staged_file = Path(res_stage["target_path"])
+            self.assertTrue(staged_file.exists())
+            self.assertEqual(staged_file.read_text(encoding="utf-8"), sess_file.read_text(encoding="utf-8"))
 
             tgt_db = tgt_home / "state_5.sqlite"
             self.assertFalse(tgt_db.exists(), "Rescue must not manufacture fake state_5.sqlite on import")

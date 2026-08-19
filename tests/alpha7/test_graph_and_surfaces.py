@@ -69,7 +69,8 @@ class GraphAndSurfacesTests(unittest.TestCase):
             chome = Path(td)
             sdir = chome / "sessions"
             sdir.mkdir()
-            (sdir / "thread_123.jsonl").write_text('{"turn":1}\n', encoding="utf-8")
+            sess_uuid = "11111111-2222-3333-4444-555555555555"
+            (sdir / f"rollout-2026-08-19T12-00-00-{sess_uuid}.jsonl").write_text('{"turn":1}\n', encoding="utf-8")
 
             adapter = DesktopAdapter(chome)
             rep = adapter.get_status()
@@ -78,7 +79,7 @@ class GraphAndSurfacesTests(unittest.TestCase):
             self.assertEqual(rep.filesystem_only_count, 1)
             self.assertEqual(rep.overall_status, "DEGRADED")
 
-            diff = adapter.get_session_diff("thread_123")
+            diff = adapter.get_session_diff(sess_uuid)
             self.assertTrue(diff["filesystem_exists"])
             self.assertFalse(diff["sqlite_exists"])
             self.assertEqual(diff["status"], "DIVERGENT")
@@ -103,7 +104,7 @@ class GraphAndSurfacesTests(unittest.TestCase):
             chome = Path(td)
             sdir = chome / "sessions"
             sdir.mkdir()
-            sfile = sdir / "test_session.jsonl"
+            sfile = sdir / "rollout-2026-08-19T12-00-00-11111111-2222-3333-4444-555555555555.jsonl"
             sfile.write_text('{"turn":1}\n', encoding="utf-8")
 
             router = DiagnosticRouter(chome)
