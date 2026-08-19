@@ -42,6 +42,12 @@ class AutopilotResult:
     is_truncated_discovery: bool = False
     invariants: List[InvariantCheckResult] = field(default_factory=list)
     message: str = ""
+    observed_surfaces: Dict[str, str] = field(default_factory=dict)
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    selected_route: str = "INSPECT"
+    blocked_actions: List[str] = field(default_factory=list)
+    recommended_next_step: str = "Review diagnostic findings"
+    confidence: str = "HIGH"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -57,6 +63,12 @@ class AutopilotResult:
                 for i in self.invariants
             ],
             "message": self.message,
+            "observed_surfaces": self.observed_surfaces,
+            "evidence": self.evidence,
+            "selected_route": self.selected_route,
+            "blocked_actions": self.blocked_actions,
+            "recommended_next_step": self.recommended_next_step,
+            "confidence": self.confidence,
         }
 
 
@@ -288,6 +300,18 @@ class AutopilotEngine:
             + (" (discovery truncated at limit)" if is_trunc else ".")
         )
 
+        observed_surfaces = {k: v.status for k, v in topology.surfaces.items()}
+        blocked_actions = []
+        if not repair_safe:
+            blocked_actions.append("MUTATION_HEURISTIC_OFF")
+        for d in diagnostics:
+            blocked_actions.extend(d.blocked_actions)
+
+        recommendations = [d.recommendation for d in diagnostics if d.recommendation]
+        recommended_next = (
+            recommendations[0] if recommendations else "Review diagnostic findings; all systems inspected safely."
+        )
+
         return AutopilotResult(
             topology=topology,
             selected_surface=selected_surface,
@@ -298,4 +322,14 @@ class AutopilotEngine:
             is_truncated_discovery=is_trunc,
             invariants=invariants,
             message=msg,
+            observed_surfaces=observed_surfaces,
+            evidence={
+                "session_count": session_count,
+                "diagnostics_count": len(diagnostics),
+                "is_truncated": is_trunc,
+            },
+            selected_route=f"ROUTE_{selected_surface.upper()}",
+            blocked_actions=sorted(list(set(blocked_actions))),
+            recommended_next_step=recommended_next,
+            confidence="HIGH" if not is_trunc else "MEDIUM",
         )

@@ -23,6 +23,10 @@ from codex_rescue.alpha7.surfaces.desktop import DesktopAdapter
 from codex_rescue.alpha7.surfaces.detector import SurfaceDetector
 
 
+from codex_rescue.thread_identity import resolve_thread_identity
+from codex_rescue.thread_store import inspect_thread_store, WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE
+
+
 @dataclass
 class DiagnosticRoute:
     symptom: str
@@ -31,6 +35,8 @@ class DiagnosticRoute:
     confidence: str = "HIGH"
     root_cause_layer: str = "UNKNOWN"
     data_loss_evidence: str = "NONE"
+    route_reason: str = "Automatic capability-based route selection"
+    blocked_actions: List[str] = field(default_factory=list)
     invariants: List[InvariantCheckResult] = field(default_factory=list)
     recommendation: Optional[str] = None
 
@@ -42,6 +48,8 @@ class DiagnosticRoute:
             "confidence": self.confidence,
             "root_cause_layer": self.root_cause_layer,
             "data_loss_evidence": self.data_loss_evidence,
+            "route_reason": self.route_reason,
+            "blocked_actions": self.blocked_actions,
             "invariants": [
                 {"id": i.invariant_id.value, "status": i.status.value, "message": i.message}
                 for i in self.invariants
@@ -61,7 +69,7 @@ class DiagnosticRouter:
     def route_session(self, session_id_or_path: str | Path) -> DiagnosticRoute:
         route = DiagnosticRoute(symptom="inspect_thread")
 
-        # 1. Cheap probe: identify path / file
+        # 1. Cheap probe: identify path / file using canonical thread identity
         route.probes_executed.append("cheap_probe_identity")
         target_path: Optional[Path] = None
         session_id = str(session_id_or_path)
@@ -70,36 +78,32 @@ class DiagnosticRouter:
             p = Path(session_id_or_path)
             if p.exists():
                 target_path = p
-                session_id = p.stem
+                identity = resolve_thread_identity(p)
+                session_id = identity.thread_id or p.stem
 
         if not target_path:
             # Look in sessions / archived_sessions
             for candidate_dir in [self.codex_home / "sessions", self.codex_home / "archived_sessions"]:
-                cand = candidate_dir / f"{session_id}.jsonl"
-                if cand.exists():
-                    target_path = cand
+                if not candidate_dir.exists():
+                    continue
+                for f in candidate_dir.rglob("*.jsonl"):
+                    ident = resolve_thread_identity(f)
+                    if ident.thread_id == session_id or f.stem == session_id:
+                        target_path = f
+                        break
+                if target_path:
                     break
 
-        # 2. Probe Filesystem vs SQLite
-        route.probes_executed.append("probe_filesystem_vs_sqlite")
+        # 2. Probe Thread Store & SQLite using canonical inspect_thread_store
+        route.probes_executed.append("probe_thread_store")
         fs_exists = target_path is not None and target_path.exists()
-        sqlite_exists = False
-        sqlite_row = None
+        store_report = None
+        if target_path:
+            store_report = inspect_thread_store(target_path, session_id=session_id, codex_home=self.codex_home)
+            if store_report.findings:
+                route.findings.extend(store_report.findings)
 
-        state_db = self.codex_home / "state.db"
-        if state_db.exists():
-            try:
-                uri = f"file:{state_db.resolve()}?mode=ro"
-                conn = sqlite3.connect(uri, uri=True, timeout=2.0)
-                try:
-                    cur = conn.cursor()
-                    cur.execute("SELECT id, rollout_path FROM threads WHERE id=?", (session_id,))
-                    sqlite_row = cur.fetchone()
-                    sqlite_exists = sqlite_row is not None
-                finally:
-                    conn.close()
-            except Exception:
-                pass
+        sqlite_exists = store_report is not None and store_report.status in ("CONSISTENT", "DIVERGED")
 
         # 3. Probe App Server
         route.probes_executed.append("probe_app_server")
@@ -109,25 +113,37 @@ class DiagnosticRouter:
         if fs_exists and not sqlite_exists:
             route.findings.append("UNINDEXED_IN_SQLITE")
             route.root_cause_layer = "DERIVED_SQLITE_INDEX"
+            route.route_reason = "Rollout exists on filesystem but is not indexed in thread-store SQLite"
             route.recommendation = "Re-register thread in derived SQLite index."
+            route.blocked_actions.append("MUTATION_BLOCKED_UNINDEXED")
         elif not fs_exists and sqlite_exists:
             route.findings.append("MISSING_ROLLOUT_FILE")
             route.root_cause_layer = "SOURCE_ROLLOUT"
+            route.route_reason = "Thread row present in SQLite but rollout file not found on disk"
             route.data_loss_evidence = "SUSPECTED"
             route.recommendation = "Search backups for missing rollout file."
+            route.blocked_actions.append("MUTATION_BLOCKED_MISSING_SOURCE")
         elif fs_exists and sqlite_exists:
-            # Check projection / Desktop visibility
-            if app_obs.visibility == SurfaceVisibility.VISIBLE:
+            if store_report and WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE in store_report.findings:
+                route.root_cause_layer = "WINDOWS_EXTENDED_PATH_BOUNDARY"
+                route.route_reason = "Rollout transcript is healthy but thread-store path has diverged across extended-path boundary"
+                route.recommendation = "Treat transcript as authoritative source; do not mutate SQLite in place without qualification."
+                route.blocked_actions.append("IN_PLACE_SQLITE_MUTATION_HOLD")
+            elif app_obs.visibility == SurfaceVisibility.VISIBLE:
                 route.root_cause_layer = "HEALTHY_MULTISURFACE"
+                route.route_reason = "Session is visible and aligned across filesystem, SQLite and App Server"
             else:
                 route.root_cause_layer = "DERIVED_DESKTOP_PROJECTION"
+                route.route_reason = "Session exists in filesystem and SQLite but App Server visibility is unconfirmed"
         else:
             route.findings.append("THREAD_NOT_FOUND")
             route.root_cause_layer = "NOT_FOUND"
+            route.route_reason = "Thread not found on filesystem or SQLite"
             route.confidence = "INSUFFICIENT_EVIDENCE"
+            route.blocked_actions.append("ALL_ACTIONS_BLOCKED")
 
         # Invariant checks
-        if fs_exists:
+        if fs_exists and target_path:
             try:
                 size = target_path.stat().st_size
                 route.invariants.append(

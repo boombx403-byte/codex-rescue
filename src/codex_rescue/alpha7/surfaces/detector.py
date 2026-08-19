@@ -8,10 +8,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+import enum
+
+class SurfaceStatus(str, enum.Enum):
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    PARTIAL = "PARTIAL"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass
 class DetectedSurface:
     name: str  # "cli", "desktop", "ide", "app_server"
     available: bool
+    status: str = SurfaceStatus.UNAVAILABLE.value
     version: Optional[str] = None
     path: Optional[str] = None
     process_running: bool = False
@@ -21,6 +31,7 @@ class DetectedSurface:
         return {
             "name": self.name,
             "available": self.available,
+            "status": self.status,
             "version": self.version,
             "path": self.path,
             "process_running": self.process_running,
@@ -85,22 +96,29 @@ class SurfaceDetector:
         # CLI presence: ~/.codex/sessions or ~/.codex/history.jsonl or cli binary
         sessions_dir = home / "sessions"
         history_file = home / "history.jsonl"
-        available = sessions_dir.exists() or history_file.exists()
+        has_sessions = sessions_dir.exists()
+        has_history = history_file.exists()
+        available = has_sessions or has_history
+        status = SurfaceStatus.AVAILABLE.value if (has_sessions and has_history) else (
+            SurfaceStatus.PARTIAL.value if available else SurfaceStatus.UNAVAILABLE.value
+        )
         return DetectedSurface(
             name="cli",
             available=available,
+            status=status,
             path=str(home) if available else None,
             details={
-                "has_sessions_dir": sessions_dir.exists(),
-                "has_history": history_file.exists(),
+                "has_sessions_dir": has_sessions,
+                "has_history": has_history,
             },
         )
 
     @staticmethod
     def _detect_desktop(home: Path) -> DetectedSurface:
-        # Desktop presence: state.db or Electron desktop data dir or process running
+        # Desktop presence: state_5.sqlite / state.sqlite / state.db or Electron desktop data dir
         system = platform.system()
-        state_db = home / "state.db"
+        sqlite_candidates = [home / "state_5.sqlite", home / "state.sqlite", home / "state.db"]
+        existing_dbs = [str(p) for p in sqlite_candidates if p.exists()]
         desktop_data_dir = None
         if system == "Windows":
             appdata = os.environ.get("APPDATA")
@@ -111,16 +129,21 @@ class SurfaceDetector:
         else:
             desktop_data_dir = Path.home() / ".config" / "Codex"
 
-        has_state_db = state_db.exists()
+        has_state_db = len(existing_dbs) > 0
         has_data_dir = desktop_data_dir is not None and desktop_data_dir.exists()
         available = has_state_db or has_data_dir
+        status = SurfaceStatus.AVAILABLE.value if (has_state_db and has_data_dir) else (
+            SurfaceStatus.PARTIAL.value if available else SurfaceStatus.UNAVAILABLE.value
+        )
 
         return DetectedSurface(
             name="desktop",
             available=available,
-            path=str(desktop_data_dir) if has_data_dir else (str(state_db) if has_state_db else None),
+            status=status,
+            path=str(desktop_data_dir) if has_data_dir else (existing_dbs[0] if existing_dbs else None),
             details={
                 "has_state_db": has_state_db,
+                "existing_dbs": existing_dbs,
                 "has_desktop_data_dir": has_data_dir,
                 "desktop_data_path": str(desktop_data_dir) if desktop_data_dir else None,
             },
@@ -141,9 +164,11 @@ class SurfaceDetector:
                     ext_path = str(item)
                     break
 
+        status = SurfaceStatus.AVAILABLE.value if found_ext else SurfaceStatus.UNAVAILABLE.value
         return DetectedSurface(
             name="ide",
             available=found_ext,
+            status=status,
             path=ext_path,
             details={"has_extension": found_ext},
         )
@@ -153,14 +178,20 @@ class SurfaceDetector:
         # App server socket / port / lockfile check
         server_info_file = home / "app_server.json"
         socket_file = home / "app_server.sock"
-        available = server_info_file.exists() or socket_file.exists()
+        has_info = server_info_file.exists()
+        has_sock = socket_file.exists()
+        available = has_info or has_sock
+        status = SurfaceStatus.AVAILABLE.value if (has_info and has_sock) else (
+            SurfaceStatus.PARTIAL.value if available else SurfaceStatus.UNAVAILABLE.value
+        )
 
         return DetectedSurface(
             name="app_server",
             available=available,
+            status=status,
             path=str(server_info_file) if server_info_file.exists() else None,
             details={
-                "has_server_info": server_info_file.exists(),
-                "has_socket": socket_file.exists(),
+                "has_server_info": has_info,
+                "has_socket": has_sock,
             },
         )
