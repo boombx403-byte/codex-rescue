@@ -23,6 +23,9 @@ from codex_rescue.alpha7.recovery.salvage_stream import SourceStatus, StreamSalv
 from codex_rescue.alpha7.simulation.transaction import SchemaFingerprint, compute_file_sha256
 
 
+from codex_rescue.thread_identity import resolve_thread_identity
+
+
 @dataclass
 class PortableManifest:
     package_version: str
@@ -33,6 +36,8 @@ class PortableManifest:
     created_at: float
     source_platform: str
     source_namespace: str
+    thread_id: Optional[str] = None
+    rollout_id: Optional[str] = None
     source_integrity: str = SourceStatus.HEALTHY  # HEALTHY, VALID_BUT_OVERSIZED, CORRUPTED, TRUNCATED_TRANSCRIPT
     records_count: int = 0
     package_classification: str = "SAFE_MIGRATION_PACKAGE"  # SAFE_MIGRATION_PACKAGE, FORENSIC_PACKAGE
@@ -43,6 +48,8 @@ class PortableManifest:
         return {
             "package_version": self.package_version,
             "session_id": self.session_id,
+            "thread_id": self.thread_id or self.session_id,
+            "rollout_id": self.rollout_id or self.session_id,
             "rollout_filename": self.rollout_filename,
             "rollout_sha256": self.rollout_sha256,
             "rollout_bytes": self.rollout_bytes,
@@ -66,6 +73,7 @@ class ImportPlan:
     safe_to_import: bool
     requires_remapping: bool
     package_classification: str = "SAFE_MIGRATION_PACKAGE"
+    stage: str = "VALIDATED"  # VALIDATED, STAGED, IMPORTED, INDEX_VISIBLE, APP_SERVER_VISIBLE, VERIFIED, BLOCKED
     invariants: List[InvariantCheckResult] = field(default_factory=list)
 
     @property
@@ -85,6 +93,7 @@ class ImportPlan:
             "safe_to_import": self.safe_to_import,
             "requires_remapping": self.requires_remapping,
             "package_classification": self.package_classification,
+            "stage": self.stage,
             "invariants": [
                 {"id": i.invariant_id.value, "status": i.status.value, "message": i.message}
                 for i in self.invariants
@@ -112,9 +121,11 @@ class PortableSessionEngine:
 
         sha = compute_file_sha256(session_path)
         file_size = session_path.stat().st_size
-        session_id = session_path.stem
-        if session_id.startswith("rollout-"):
-            session_id = session_id[8:]
+        
+        ident = resolve_thread_identity(session_path)
+        thread_id = ident.thread_id or session_path.stem
+        rollout_id = ident.filename_rollout_id or thread_id
+        session_id = thread_id
 
         meta = dict(metadata or {})
         if workspace_path:
@@ -130,6 +141,8 @@ class PortableSessionEngine:
         manifest = PortableManifest(
             package_version="1.0",
             session_id=session_id,
+            thread_id=thread_id,
+            rollout_id=rollout_id,
             rollout_filename=session_path.name,
             rollout_sha256=sha,
             rollout_bytes=file_size,

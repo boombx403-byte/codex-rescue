@@ -6,12 +6,24 @@ from typing import Any, Dict, List, Optional, Set
 
 from codex_rescue.alpha7.invariants import InvariantCheckResult, InvariantEngine, InvariantStatus
 
+import enum
+
+
+class CompatibilityVerdict(str, enum.Enum):
+    SUPPORTED = "SUPPORTED"
+    BEST_EFFORT = "BEST_EFFORT"
+    READ_ONLY_ONLY = "READ_ONLY_ONLY"
+    UNSUPPORTED = "UNSUPPORTED"
+    UNKNOWN = "UNKNOWN"
+
+
 SUPPORTED_ROLLOUT_SCHEMAS: Set[int] = {1, 2}
 SUPPORTED_SQLITE_SCHEMAS: Set[int] = {1, 2, 3}
 
 
 @dataclass
 class CompatibilityReport:
+    verdict: str
     rollout_schema_version: int
     sqlite_schema_version: int
     rollout_schema_supported: bool
@@ -24,6 +36,7 @@ class CompatibilityReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "verdict": self.verdict,
             "rollout_schema_version": self.rollout_schema_version,
             "sqlite_schema_version": self.sqlite_schema_version,
             "rollout_schema_supported": self.rollout_schema_supported,
@@ -71,7 +84,17 @@ class CompatibilityEngine:
             elif not sqlite_ok:
                 reason = f"UNKNOWN_SQLITE_SCHEMA_{sqlite_schema}"
 
+        if rollout_ok and sqlite_ok and app_ok:
+            verdict = CompatibilityVerdict.SUPPORTED.value
+        elif rollout_ok and sqlite_ok:
+            verdict = CompatibilityVerdict.BEST_EFFORT.value
+        elif rollout_ok:
+            verdict = CompatibilityVerdict.READ_ONLY_ONLY.value
+        else:
+            verdict = CompatibilityVerdict.UNSUPPORTED.value
+
         return CompatibilityReport(
+            verdict=verdict,
             rollout_schema_version=rollout_schema,
             sqlite_schema_version=sqlite_schema,
             rollout_schema_supported=rollout_ok,
