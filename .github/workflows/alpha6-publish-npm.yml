@@ -92,7 +92,7 @@ jobs:
             "codex-rescue-darwin-x64"
           )
           for pkg in "${PLATFORMS[@]}"; do
-            tarball="release-bundle/${pkg}-${EXPECTED_NPM_VERSION}.tgz"
+            tarball="./release-bundle/${pkg}-${EXPECTED_NPM_VERSION}.tgz"
             echo "Publishing platform package: $tarball"
             npm publish "$tarball" --access public --tag next
             test "$(npm view "${pkg}@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
@@ -104,7 +104,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          tarball="release-bundle/codex-rescue-${EXPECTED_NPM_VERSION}.tgz"
+          tarball="./release-bundle/codex-rescue-${EXPECTED_NPM_VERSION}.tgz"
           echo "Publishing top-level package: $tarball"
           npm publish "$tarball" --access public --tag next
           test "$(npm view "codex-rescue@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
