@@ -15,6 +15,7 @@ from codex_rescue.alpha7.invariants import (
     InvariantId,
     InvariantStatus,
 )
+from codex_rescue.thread_identity import resolve_thread_identity
 from codex_rescue.alpha7.simulation.transaction import compute_file_sha256
 from codex_rescue.alpha7.surfaces.desktop import DesktopAdapter, WriterStatus
 
@@ -91,9 +92,8 @@ class StateObserver:
 
         # Detect additions & modifications
         for p_str, snap in current_fs_state.items():
-            sid = Path(p_str).stem
-            if sid.startswith("rollout-"):
-                sid = sid[8:]
+            ident = resolve_thread_identity(p_str)
+            sid = ident.thread_id
 
             if p_str not in self._last_fs_state:
                 e = self.recorder.record_event(
@@ -128,7 +128,8 @@ class StateObserver:
         # Detect deletions
         for p_str in self._last_fs_state:
             if p_str not in current_fs_state:
-                sid = Path(p_str).stem
+                ident = resolve_thread_identity(p_str)
+                sid = ident.thread_id
                 e = self.recorder.record_event(
                     EventType.ROLLOUT_DELETED,
                     session_id=sid,

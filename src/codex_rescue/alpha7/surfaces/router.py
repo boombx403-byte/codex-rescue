@@ -72,27 +72,42 @@ class DiagnosticRouter:
         # 1. Cheap probe: identify path / file using canonical thread identity
         route.probes_executed.append("cheap_probe_identity")
         target_path: Optional[Path] = None
-        session_id = str(session_id_or_path)
+        session_id: Optional[str] = None
+        input_str = str(session_id_or_path).strip()
 
-        if isinstance(session_id_or_path, Path) or ("/" in session_id or "\\" in session_id):
+        if isinstance(session_id_or_path, Path) or ("/" in input_str or "\\" in input_str):
             p = Path(session_id_or_path)
             if p.exists():
                 target_path = p
                 identity = resolve_thread_identity(p)
-                session_id = identity.thread_id or p.stem
+                session_id = identity.thread_id
+        else:
+            session_id = input_str
 
-        if not target_path:
-            # Look in sessions / archived_sessions
+        if not target_path and session_id:
+            # Look in sessions / archived_sessions by canonical thread_id ONLY
             for candidate_dir in [self.codex_home / "sessions", self.codex_home / "archived_sessions"]:
                 if not candidate_dir.exists():
                     continue
                 for f in candidate_dir.rglob("*.jsonl"):
                     ident = resolve_thread_identity(f)
-                    if ident.thread_id == session_id or f.stem == session_id:
+                    if ident.thread_id and ident.thread_id == session_id:
                         target_path = f
                         break
                 if target_path:
                     break
+
+        # If target file was found but ThreadId cannot be resolved
+        if target_path and session_id is None:
+            ident = resolve_thread_identity(target_path)
+            if ident.thread_id is None:
+                route.findings.append("IDENTITY_UNKNOWN")
+                route.root_cause_layer = "UNRESOLVED_THREAD_IDENTITY"
+                route.confidence = "UNKNOWN"
+                route.route_reason = "Rollout file exists but logical ThreadId is unresolved; arbitrary filenames are not identities"
+                route.recommendation = "Inspect file headers or retain as forensic artifact; automated mutation blocked."
+                route.blocked_actions.append("MUTATION_BLOCKED_UNRESOLVED_IDENTITY")
+                return route
 
         # 2. Probe Thread Store & SQLite using canonical inspect_thread_store
         route.probes_executed.append("probe_thread_store")
@@ -107,14 +122,14 @@ class DiagnosticRouter:
 
         # 3. Probe App Server
         route.probes_executed.append("probe_app_server")
-        app_obs = self.app_server_adapter.observe_thread(session_id)
+        app_obs = self.app_server_adapter.observe_thread(session_id) if session_id else None
 
         # 4. Diagnose based on observed evidence
         if fs_exists and not sqlite_exists:
             route.findings.append("UNINDEXED_IN_SQLITE")
             route.root_cause_layer = "DERIVED_SQLITE_INDEX"
             route.route_reason = "Rollout exists on filesystem but is not indexed in thread-store SQLite"
-            route.recommendation = "Re-register thread in derived SQLite index."
+            route.recommendation = "derived index divergence observed; mutation currently HOLD"
             route.blocked_actions.append("MUTATION_BLOCKED_UNINDEXED")
         elif not fs_exists and sqlite_exists:
             route.findings.append("MISSING_ROLLOUT_FILE")
@@ -129,9 +144,12 @@ class DiagnosticRouter:
                 route.route_reason = "Rollout transcript is healthy but thread-store path has diverged across extended-path boundary"
                 route.recommendation = "Treat transcript as authoritative source; do not mutate SQLite in place without qualification."
                 route.blocked_actions.append("IN_PLACE_SQLITE_MUTATION_HOLD")
-            elif app_obs.visibility == SurfaceVisibility.VISIBLE:
+            elif app_obs and app_obs.visibility == SurfaceVisibility.VISIBLE:
                 route.root_cause_layer = "HEALTHY_MULTISURFACE"
                 route.route_reason = "Session is visible and aligned across filesystem, SQLite and App Server"
+            elif app_obs and app_obs.visibility == SurfaceVisibility.UNKNOWN:
+                route.root_cause_layer = "APP_SERVER_UNKNOWN"
+                route.route_reason = "Session exists in filesystem and SQLite; App Server visibility is UNKNOWN"
             else:
                 route.root_cause_layer = "DERIVED_DESKTOP_PROJECTION"
                 route.route_reason = "Session exists in filesystem and SQLite but App Server visibility is unconfirmed"

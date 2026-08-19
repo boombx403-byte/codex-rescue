@@ -19,6 +19,7 @@ from codex_rescue.alpha7.invariants import (
 from codex_rescue.alpha7.recovery.backup import BackupEngine, BackupManifest, compute_file_sha256_streaming
 from codex_rescue.alpha7.simulation.simulator import RepairSimulator, SimulationResult
 from codex_rescue.alpha7.surfaces.desktop import DesktopAdapter, WriterStatus
+from codex_rescue.thread_identity import resolve_thread_identity
 
 
 def compute_file_sha256(path: Path) -> str:
@@ -152,9 +153,24 @@ class TransactionalRepairEngine:
 
         # 1. Snapshot precondition & initial source hash via streaming
         sha_before = compute_file_sha256(session_file)
-        session_id = session_file.stem
-        if session_id.startswith("rollout-"):
-            session_id = session_id[8:]
+        ident = resolve_thread_identity(session_file)
+        session_id = ident.thread_id
+        if not session_id:
+            inv_id = InvariantCheckResult(
+                invariant_id=InvariantId.INV_004,
+                status=InvariantStatus.FAIL,
+                message=f"Mutation blocked: unresolved ThreadId for {session_file.name}",
+            )
+            invariants.append(inv_id)
+            return TransactionResult(
+                operation_id=op_id,
+                status="BLOCKED",
+                initial_source_sha256=sha_before,
+                final_source_sha256=sha_before,
+                source_preserved=True,
+                message=f"Mutation blocked: unresolved logical ThreadId for {session_file.name}",
+                invariants=invariants,
+            )
 
         # 2. Check active writer precondition (INV-003) - Fail-closed on ACTIVE or UNKNOWN
         writer_status = self.desktop_adapter.detect_writer_status()

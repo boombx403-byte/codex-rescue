@@ -52,13 +52,18 @@ STATE_TABLE_CANDIDATES = (
 )
 
 
+from codex_rescue.thread_identity import resolve_thread_identity
+
+
 @dataclass
 class DiscoveredSessionFile:
-    session_id: str
+    session_id: Optional[str]
     path: Path
     is_archived: bool
     size_bytes: int
     modified_time: float
+    thread_id: Optional[str] = None
+    rollout_id: Optional[str] = None
 
 
 @dataclass
@@ -338,12 +343,13 @@ class DesktopAdapter:
 
                     try:
                         stat = p.stat()
-                        sid = p.stem
-                        if sid.startswith("rollout-"):
-                            sid = sid[8:]
+                        ident = resolve_thread_identity(p)
+                        sid = ident.thread_id
                         sessions.append(
                             DiscoveredSessionFile(
                                 session_id=sid,
+                                thread_id=ident.thread_id,
+                                rollout_id=ident.filename_rollout_id,
                                 path=p,
                                 is_archived=is_archived,
                                 size_bytes=stat.st_size,
@@ -495,8 +501,19 @@ class DesktopAdapter:
             notes="Session not indexed in desktop state",
         )
 
-    def get_session_diff(self, session_id: str) -> Dict[str, Any]:
+    def get_session_diff(self, session_id: Optional[str]) -> Dict[str, Any]:
         """Compares physical filesystem rollout existence against all SQLite stores."""
+        if not session_id:
+            return {
+                "session_id": None,
+                "filesystem_exists": False,
+                "filesystem_path": None,
+                "is_archived": False,
+                "sqlite_matches": [],
+                "sqlite_exists": False,
+                "status": "UNRESOLVED_IDENTITY",
+            }
+
         fs_sessions, _ = self.discover_all_sessions()
         matched_fs = next((s for s in fs_sessions if s.session_id == session_id), None)
 

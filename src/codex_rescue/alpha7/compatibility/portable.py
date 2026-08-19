@@ -29,15 +29,18 @@ from codex_rescue.thread_identity import resolve_thread_identity
 @dataclass
 class PortableManifest:
     package_version: str
-    session_id: str
     rollout_filename: str
     rollout_sha256: str
     rollout_bytes: int
     created_at: float
     source_platform: str
     source_namespace: str
+    session_id: Optional[str] = None
     thread_id: Optional[str] = None
     rollout_id: Optional[str] = None
+    identity_status: str = "UNKNOWN"  # RESOLVED, UNRESOLVED, CONFLICT
+    identity_confidence: str = "UNKNOWN"
+    identity_conflict: bool = False
     source_integrity: str = SourceStatus.HEALTHY  # HEALTHY, VALID_BUT_OVERSIZED, CORRUPTED, TRUNCATED_TRANSCRIPT
     records_count: int = 0
     package_classification: str = "SAFE_MIGRATION_PACKAGE"  # SAFE_MIGRATION_PACKAGE, FORENSIC_PACKAGE
@@ -48,8 +51,8 @@ class PortableManifest:
         return {
             "package_version": self.package_version,
             "session_id": self.session_id,
-            "thread_id": self.thread_id or self.session_id,
-            "rollout_id": self.rollout_id or self.session_id,
+            "thread_id": self.thread_id,
+            "rollout_id": self.rollout_id,
             "rollout_filename": self.rollout_filename,
             "rollout_sha256": self.rollout_sha256,
             "rollout_bytes": self.rollout_bytes,
@@ -57,6 +60,9 @@ class PortableManifest:
             "source_platform": self.source_platform,
             "source_namespace": self.source_namespace,
             "source_integrity": self.source_integrity,
+            "identity_status": self.identity_status,
+            "identity_confidence": self.identity_confidence,
+            "identity_conflict": self.identity_conflict,
             "records_count": self.records_count,
             "package_classification": self.package_classification,
             "archive_state": self.archive_state,
@@ -66,14 +72,14 @@ class PortableManifest:
 
 @dataclass
 class ImportPlan:
-    session_id: str
+    session_id: Optional[str]
     target_rollout_path: str
     conflict_detected: bool
     conflict_reason: Optional[str]
     safe_to_import: bool
     requires_remapping: bool
     package_classification: str = "SAFE_MIGRATION_PACKAGE"
-    stage: str = "VALIDATED"  # VALIDATED, STAGED, IMPORTED, INDEX_VISIBLE, APP_SERVER_VISIBLE, VERIFIED, BLOCKED
+    stage: str = "VALIDATED"  # VALIDATED, STAGED, SOURCE_COPIED, INDEX_VISIBLE, SURFACE_VISIBLE, VERIFIED, BLOCKED
     invariants: List[InvariantCheckResult] = field(default_factory=list)
 
     @property
@@ -123,19 +129,24 @@ class PortableSessionEngine:
         file_size = session_path.stat().st_size
         
         ident = resolve_thread_identity(session_path)
-        thread_id = ident.thread_id or session_path.stem
-        rollout_id = ident.filename_rollout_id or thread_id
+        thread_id = ident.thread_id
+        rollout_id = ident.filename_rollout_id
         session_id = thread_id
 
         meta = dict(metadata or {})
         if workspace_path:
             meta["workspace_path"] = workspace_path
 
-        classification = (
-            "SAFE_MIGRATION_PACKAGE"
-            if salvage_res.is_migration_safe
-            else "FORENSIC_PACKAGE"
-        )
+        # If identity is unresolved or has conflict, migration is strictly blocked (forensic only)
+        identity_status = "CONFLICT" if ident.conflict else ("RESOLVED" if thread_id else "UNRESOLVED")
+        if thread_id is None or ident.conflict:
+            classification = "FORENSIC_PACKAGE"
+        else:
+            classification = (
+                "SAFE_MIGRATION_PACKAGE"
+                if salvage_res.is_migration_safe
+                else "FORENSIC_PACKAGE"
+            )
 
         ns = detect_path_namespace(session_path)
         manifest = PortableManifest(
@@ -143,6 +154,9 @@ class PortableSessionEngine:
             session_id=session_id,
             thread_id=thread_id,
             rollout_id=rollout_id,
+            identity_status=identity_status,
+            identity_confidence=ident.confidence,
+            identity_conflict=ident.conflict,
             rollout_filename=session_path.name,
             rollout_sha256=sha,
             rollout_bytes=file_size,
