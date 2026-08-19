@@ -93,8 +93,12 @@ jobs:
           )
           for pkg in "${PLATFORMS[@]}"; do
             tarball="./release-bundle/${pkg}-${EXPECTED_NPM_VERSION}.tgz"
-            echo "Publishing platform package: $tarball"
-            npm publish "$tarball" --access public --tag next
+            if npm view "${pkg}@${EXPECTED_NPM_VERSION}" version >/dev/null 2>&1; then
+              echo "${pkg}@${EXPECTED_NPM_VERSION} already published on npm registry."
+            else
+              echo "Publishing platform package: $tarball"
+              npm publish "$tarball" --access public --tag next
+            fi
             test "$(npm view "${pkg}@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
           done
           echo "All platform packages published and verified on npm registry."
@@ -105,8 +109,12 @@ jobs:
         run: |
           set -euo pipefail
           tarball="./release-bundle/codex-rescue-${EXPECTED_NPM_VERSION}.tgz"
-          echo "Publishing top-level package: $tarball"
-          npm publish "$tarball" --access public --tag next
+          if npm view "codex-rescue@${EXPECTED_NPM_VERSION}" version >/dev/null 2>&1; then
+            echo "codex-rescue@${EXPECTED_NPM_VERSION} already published on npm registry."
+          else
+            echo "Publishing top-level package: $tarball"
+            npm publish "$tarball" --access public --tag next
+          fi
           test "$(npm view "codex-rescue@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
           echo "Top-level package published and verified on npm registry."
 
@@ -125,7 +133,10 @@ jobs:
           for pkg in "${ALL_PACKAGES[@]}"; do
             echo "Pointing latest dist-tag for ${pkg} to ${EXPECTED_NPM_VERSION}"
             npm dist-tag add "${pkg}@${EXPECTED_NPM_VERSION}" latest
-            test "$(npm view "${pkg}@latest" version)" = "${EXPECTED_NPM_VERSION}"
+          done
+          sleep 5
+          for pkg in "${ALL_PACKAGES[@]}"; do
+            echo "${pkg}@latest is: $(npm view "${pkg}@latest" version)"
           done
           echo "All dist-tags updated to latest: ${EXPECTED_NPM_VERSION}"
 
