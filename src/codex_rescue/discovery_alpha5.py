@@ -5,7 +5,7 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +20,15 @@ from .discovery import (
     codex_home_path,
     lightweight_scan,
 )
+from .thread_store import WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE
+from .windows_paths import compare_windows_paths, path_identity as _path_identity
 
 
 MAX_DB_INVENTORY_ROWS = 100_000
 MAX_DB_CANDIDATES = 32
-_UUID_RE = re.compile(
-    r"(?i)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+_UUID_RE = re.compile(r"(?i)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+_WINDOWS_ABSOLUTE_RE = re.compile(
+    r"(?i)^(?:[a-z]:[\\/]|(?:\\\\\?\\|//\?/)(?:[a-z]:[\\/]|UNC[\\/])|(?:\\\\|//)(?![?.][\\/]))"
 )
 
 
@@ -35,6 +38,8 @@ class Alpha5SessionSummary(SessionSummary):
     exists: bool = True
     inventory_mismatch: str | None = None
     inventory_db: str | None = None
+    thread_store_status: str = "UNKNOWN"
+    finding_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
@@ -44,6 +49,8 @@ class Alpha5SessionSummary(SessionSummary):
                 "exists": self.exists,
                 "inventory_mismatch": self.inventory_mismatch,
                 "inventory_db": self.inventory_db,
+                "thread_store_status": self.thread_store_status,
+                "finding_ids": list(self.finding_ids),
             }
         )
         return data
@@ -76,17 +83,9 @@ def _thread_id_from_path(path: Path) -> str | None:
 
 
 def path_identity(value: str | os.PathLike[str]) -> str:
-    """Normalize local/Windows/WSL spellings without touching the filesystem."""
+    """Normalize supported local/Windows/WSL spellings without filesystem mutation."""
 
-    text = os.fspath(value).strip().replace("\\", "/")
-    text = re.sub(r"/+", "/", text)
-    drive = re.match(r"(?i)^([a-z]):/(.*)$", text)
-    if drive:
-        return f"win:{drive.group(1).lower()}:/{drive.group(2).casefold().rstrip('/')}"
-    wsl = re.match(r"(?i)^/mnt/([a-z])/(.*)$", text)
-    if wsl:
-        return f"win:{wsl.group(1).lower()}:/{wsl.group(2).casefold().rstrip('/')}"
-    return "posix:" + text.rstrip("/")
+    return _path_identity(value)
 
 
 def _timestamp(value: Any) -> float:
@@ -127,25 +126,23 @@ def _column(columns: set[str], names: tuple[str, ...]) -> str | None:
     return next((name for name in names if name in columns), None)
 
 
-def _read_inventory(root: Path) -> tuple[list[_InventoryRow], bool]:
+def _read_inventory(root: Path) -> tuple[list[_InventoryRow], bool, bool]:
     rows: list[_InventoryRow] = []
     inventory_available = False
+    saw_database = False
+    read_error = False
     for db_path in _sqlite_candidates(root):
+        saw_database = True
         connection: sqlite3.Connection | None = None
         try:
             connection = _connect_read_only(db_path)
             table_names = {
                 str(row[0])
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_schema WHERE type='table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='table'")
             }
             if "threads" not in table_names:
                 continue
-            columns = {
-                str(row[1])
-                for row in connection.execute('PRAGMA table_info("threads")')
-            }
+            columns = {str(row[1]) for row in connection.execute('PRAGMA table_info("threads")')}
             id_column = _column(columns, ("id", "thread_id", "session_id"))
             path_column = _column(columns, ("rollout_path", "session_path", "path"))
             if id_column is None and path_column is None:
@@ -155,18 +152,9 @@ def _read_inventory(root: Path) -> tuple[list[_InventoryRow], bool]:
             archived_column = _column(columns, ("archived", "is_archived"))
             updated_column = _column(columns, ("updated_at", "modified_at", "created_at"))
             selected = [id_column, path_column, cwd_column, archived_column, updated_column]
-            expressions = [
-                _quote_identifier(name) if name else "NULL"
-                for name in selected
-            ]
-            order = (
-                f" ORDER BY {_quote_identifier(updated_column)} DESC"
-                if updated_column
-                else ""
-            )
-            sql = (
-                "SELECT " + ", ".join(expressions) + " FROM \"threads\"" + order + " LIMIT ?"
-            )
+            expressions = [_quote_identifier(name) if name else "NULL" for name in selected]
+            order = f" ORDER BY {_quote_identifier(updated_column)} DESC" if updated_column else ""
+            sql = "SELECT " + ", ".join(expressions) + ' FROM "threads"' + order + " LIMIT ?"
             for row in connection.execute(sql, (MAX_DB_INVENTORY_ROWS,)):
                 thread_id = str(row[0]).strip() if row[0] not in (None, "") else None
                 rollout_path = str(row[1]).strip() if row[1] not in (None, "") else None
@@ -182,21 +170,20 @@ def _read_inventory(root: Path) -> tuple[list[_InventoryRow], bool]:
                         db_path=str(db_path),
                     )
                 )
-        except sqlite3.DatabaseError:
-            # Inventory is enrichment.  A malformed/locked DB must not hide
-            # filesystem truth; doctor performs stricter projection checks.
+        except (sqlite3.DatabaseError, OSError):
+            read_error = True
             continue
         finally:
             if connection is not None:
                 connection.close()
-    return rows, inventory_available
+    inventory_unknown = saw_database and read_error and not inventory_available
+    return rows, inventory_available, inventory_unknown
 
 
 def _candidate_local_path(root: Path, raw: str | None) -> Path | None:
     if not raw:
         return None
-    # Do not reinterpret a Windows absolute path as a relative POSIX path.
-    if re.match(r"(?i)^[a-z]:[\\/]", raw):
+    if _WINDOWS_ABSOLUTE_RE.match(raw):
         return Path(raw)
     expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
     if not expanded.is_absolute():
@@ -205,6 +192,14 @@ def _candidate_local_path(root: Path, raw: str | None) -> Path | None:
         return expanded.resolve()
     except OSError:
         return expanded
+
+
+def _can_prove_local_absence(raw: str | None) -> bool:
+    if not raw:
+        return False
+    if _WINDOWS_ABSOLUTE_RE.match(raw):
+        return os.name == "nt"
+    return True
 
 
 def _repo_name(cwd: str | None) -> str | None:
@@ -219,12 +214,37 @@ def _wrap(
     indexed: bool | None,
     mismatch: str | None,
     inventory: _InventoryRow | None,
+    inventory_unknown: bool = False,
 ) -> Alpha5SessionSummary:
     status = summary.status
     reason = summary.reason
+    findings: tuple[str, ...] = ()
+    thread_store_status = "UNKNOWN"
     if summary.size == 0:
         status = "suspicious"
         reason = "empty rollout; may be actively materializing"
+    if inventory is not None:
+        thread_store_status = "CONSISTENT"
+        if inventory.rollout_path:
+            comparison = compare_windows_paths(inventory.rollout_path, str(summary.path))
+            if comparison.relation == "EQUIVALENT" and comparison.namespace_divergence:
+                status = "suspicious" if status == "healthy" else status
+                reason = "source rollout is readable but thread-store path crosses the Windows extended-path namespace boundary"
+                mismatch = "windows_rollout_path_identity_divergence"
+                thread_store_status = "DIVERGED"
+                findings = (WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE,)
+            elif comparison.relation == "DIFFERENT" and path_identity(inventory.rollout_path) != path_identity(summary.path):
+                thread_store_status = "DIVERGED"
+            elif comparison.relation == "UNKNOWN" and path_identity(inventory.rollout_path) != path_identity(summary.path):
+                thread_store_status = "UNKNOWN"
+    elif inventory_unknown:
+        thread_store_status = "UNKNOWN"
+        if status == "healthy":
+            status = "suspicious"
+            reason = "source rollout is readable but thread-store inventory could not be inspected read-only"
+        mismatch = mismatch or "inventory_unreadable"
+    elif indexed is False:
+        thread_store_status = "UNRECORDED"
     return Alpha5SessionSummary(
         path=summary.path,
         session_id=summary.session_id,
@@ -241,6 +261,8 @@ def _wrap(
         exists=True,
         inventory_mismatch=mismatch,
         inventory_db=inventory.db_path if inventory else None,
+        thread_store_status=thread_store_status,
+        finding_ids=findings,
     )
 
 
@@ -256,7 +278,7 @@ def discover_sessions(
     """Merge filesystem rollout truth with read-only SQLite inventory enrichment."""
 
     root = codex_home_path(codex_home)
-    inventory_rows, inventory_available = _read_inventory(root)
+    inventory_rows, inventory_available, inventory_unknown = _read_inventory(root)
     candidates: list[_Candidate] = []
     by_id: dict[str, _Candidate] = {}
     by_path: dict[str, _Candidate] = {}
@@ -308,15 +330,8 @@ def discover_sessions(
         if identity:
             by_path[identity] = missing
 
-    # Stable ordering: freshest first, then logical id/path.  Correlate and
-    # deduplicate before applying --limit so duplicate candidates cannot consume
-    # slots that should hold distinct logical sessions.
     candidates.sort(
-        key=lambda item: (
-            item.mtime,
-            item.thread_id or "",
-            path_identity(item.raw_path or item.path or ""),
-        ),
+        key=lambda item: (item.mtime, item.thread_id or "", path_identity(item.raw_path or item.path or "")),
         reverse=True,
     )
     max_results = None if limit is None else max(0, int(limit))
@@ -339,7 +354,7 @@ def discover_sessions(
 
         path = candidate.path
         exists = False
-        if path is not None:
+        if path is not None and _can_prove_local_absence(candidate.raw_path or str(path)):
             try:
                 exists = path.is_file()
             except OSError:
@@ -371,6 +386,7 @@ def discover_sessions(
                         exists=False,
                         inventory_mismatch="rollout_inaccessible" if candidate.inventory else None,
                         inventory_db=candidate.inventory.db_path if candidate.inventory else None,
+                        thread_store_status="UNKNOWN",
                     )
                 )
                 if max_results is not None and len(results) >= max_results:
@@ -379,7 +395,13 @@ def discover_sessions(
             indexed = True if candidate.inventory else (False if inventory_available else None)
             mismatch = "rollout_not_indexed" if inventory_available and candidate.inventory is None else None
             results.append(
-                _wrap(summary, indexed=indexed, mismatch=mismatch, inventory=candidate.inventory)
+                _wrap(
+                    summary,
+                    indexed=indexed,
+                    mismatch=mismatch,
+                    inventory=candidate.inventory,
+                    inventory_unknown=inventory_unknown,
+                )
             )
             if max_results is not None and len(results) >= max_results:
                 break
@@ -388,6 +410,7 @@ def discover_sessions(
         if candidate.inventory is None:
             continue
         missing_path = path or Path(candidate.raw_path or f"indexed-thread-{candidate.thread_id or 'unknown'}")
+        absence_proven = _can_prove_local_absence(candidate.raw_path)
         results.append(
             Alpha5SessionSummary(
                 path=missing_path,
@@ -397,14 +420,20 @@ def discover_sessions(
                 first_prompt=None,
                 last_prompt=None,
                 status="suspicious",
-                reason="indexed rollout missing from filesystem",
+                reason=(
+                    "indexed rollout missing from filesystem"
+                    if absence_proven
+                    else "indexed rollout path uses a foreign or uninspectable path namespace; presence is unknown"
+                ),
                 mtime=candidate.mtime,
                 size=0,
                 archived=candidate.archived,
                 indexed=True,
                 exists=False,
-                inventory_mismatch="indexed_rollout_missing",
+                inventory_mismatch="indexed_rollout_missing" if absence_proven else "rollout_presence_unknown",
                 inventory_db=candidate.inventory.db_path,
+                thread_store_status="DIVERGED" if absence_proven else "UNKNOWN",
+                finding_ids=("ROLLOUT_MISSING",) if absence_proven else (),
             )
         )
         if max_results is not None and len(results) >= max_results:
@@ -417,8 +446,6 @@ def resolve_latest(
     *,
     include_archived: bool = True,
 ) -> Path | None:
-    # Direct doctor/salvage require an existing rollout.  SQLite-only rows are
-    # inventory evidence, not a path that Rescue should pretend it can read.
     root = codex_home_path(codex_home)
     candidates: list[tuple[float, str, Path]] = []
     for path in _rollout_paths(root, include_archived):
@@ -431,9 +458,4 @@ def resolve_latest(
     return max(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
-__all__ = [
-    "Alpha5SessionSummary",
-    "discover_sessions",
-    "path_identity",
-    "resolve_latest",
-]
+__all__ = ["Alpha5SessionSummary", "discover_sessions", "path_identity", "resolve_latest"]
