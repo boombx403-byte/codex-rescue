@@ -78,3 +78,12 @@ class PrivacyRedactionEngine:
         if not audit.passed_validation:
             raise ValueError("Privacy validation failed for share report")
         return sanitized
+
+
+RedactionEngine = PrivacyRedactionEngine
+
+__all__ = [
+    "PrivacyRedactionEngine",
+    "RedactionAudit",
+    "RedactionEngine",
+]

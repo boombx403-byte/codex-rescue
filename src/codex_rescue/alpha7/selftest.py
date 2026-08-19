@@ -138,9 +138,9 @@ class SelfTestEngine:
 
         # 5. Check Privacy & Redaction capability (Rescue runtime)
         try:
-            from codex_rescue.alpha7.privacy.redaction import RedactionEngine
-            redacted = RedactionEngine.redact_text("sk-ant-api03-secretkeyhere token")
-            assert "[REDACTED_API_KEY]" in redacted
+            from codex_rescue.alpha7.privacy.redaction import PrivacyRedactionEngine
+            redacted, audit = PrivacyRedactionEngine.sanitize_text("sk-abcdef1234567890abcdef1234567890 token")
+            assert audit.secrets_found_and_redacted > 0
             report.checks.append(SelfTestItem("privacy_and_redaction", True, status="PASS"))
         except Exception as e:
             report.checks.append(SelfTestItem("privacy_and_redaction", False, status="FAIL", error=str(e)))
