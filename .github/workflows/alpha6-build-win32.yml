@@ -29,6 +29,11 @@ jobs:
         run: |
           python -m pip install . "pyinstaller==6.22.1"
 
+      - name: Qualify Windows diagnostic boundaries
+        run: |
+          python -m unittest discover -s tests -p "test_windows_path_identity.py"
+          python -m unittest discover -s tests -p "test_lifecycle_truth.py"
+
       - name: Build Windows standalone executable
         run: |
           python -m PyInstaller --clean --noconfirm --onefile --name codex-rescue scripts/native_entry.py

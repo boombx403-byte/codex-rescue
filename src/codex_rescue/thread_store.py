@@ -10,6 +10,7 @@ from .alpha5 import _connect_read_only, _quote_identifier
 from .windows_paths import compare_windows_paths
 
 WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE = "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE"
+THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE = "THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE"
 ROLLOUT_MISSING = "ROLLOUT_MISSING"
 NEVER_PERSISTED_TEMP_CHILD = "NEVER_PERSISTED_TEMP_CHILD"
 INDEX_DIVERGENCE = "INDEX_DIVERGENCE"
@@ -190,11 +191,12 @@ def inspect_thread_store(
             if comparison.relation == "DIFFERENT":
                 return ThreadStoreReport(
                     status="DIVERGED",
+                    findings=(THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE,),
                     db_path=str(db_path),
                     stored_rollout_path=stored,
                     discovered_rollout_path=discovered,
                     path_relation="DIFFERENT",
-                    reason="thread-store rollout_path identifies a different Windows location; exact cause is not classified here",
+                    reason="thread-store rollout_path identifies a different location; exact cause is not proven",
                 )
             return ThreadStoreReport(
                 status="UNKNOWN",
@@ -234,6 +236,7 @@ __all__ = [
     "INDEX_DIVERGENCE",
     "NEVER_PERSISTED_TEMP_CHILD",
     "ROLLOUT_MISSING",
+    "THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE",
     "ThreadStoreReport",
     "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
     "classify_rollout_presence",
