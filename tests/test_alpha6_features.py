@@ -99,7 +99,8 @@ class Alpha6FeatureTests(unittest.TestCase):
         self.assertIn("SAFE_NEXT_ACTION", d)
 
     def test_diff_and_timeline(self):
-        s_path = self.home / "sessions" / "diff_test.jsonl"
+        thread_id = "019abcde-4444-7222-8333-444444444444"
+        s_path = self.home / "sessions" / f"rollout-2026-08-19T13-00-00-{thread_id}.jsonl"
         s_path.write_text(
             json.dumps({"type": "turn_started", "ordinal": 1, "timestamp": "2026-08-18T10:00:00Z"}) + "\n" +
             json.dumps({"type": "tool_call", "name": "shell", "ordinal": 2, "timestamp": "2026-08-18T10:00:01Z"}) + "\n" +
@@ -109,7 +110,7 @@ class Alpha6FeatureTests(unittest.TestCase):
         )
 
         diff = diff_session(s_path, codex_home=self.home)
-        self.assertEqual(diff.session_id, "diff_test")
+        self.assertEqual(diff.session_id, thread_id)
 
         timeline = build_timeline(s_path)
         self.assertEqual(timeline.total_events, 4)
@@ -118,15 +119,18 @@ class Alpha6FeatureTests(unittest.TestCase):
         self.assertEqual(timeline.events[2].event_type, "tool_output_persisted")
 
     def test_graph_and_storage(self):
-        parent = self.home / "sessions" / "parent_session.jsonl"
-        parent.write_text(json.dumps({"type": "turn_started", "subagent_id": "child_subagent_1"}) + "\n", encoding="utf-8")
+        parent_id = "019abcde-5555-7222-8333-444444444444"
+        child_id = "019abcde-6666-7222-8333-444444444444"
+        parent = self.home / "sessions" / f"rollout-2026-08-19T13-10-00-{parent_id}.jsonl"
+        parent.write_text(json.dumps({"type": "turn_started", "subagent_id": child_id}) + "\n", encoding="utf-8")
 
         (self.home / "sessions" / "subagents").mkdir(parents=True, exist_ok=True)
-        child = self.home / "sessions" / "subagents" / "child_subagent_1.jsonl"
-        child.write_text(json.dumps({"type": "turn_started", "parent_session_id": "parent_session"}) + "\n", encoding="utf-8")
+        child = self.home / "sessions" / "subagents" / f"rollout-2026-08-19T13-11-00-{child_id}.jsonl"
+        child.write_text(json.dumps({"type": "turn_started", "parent_session_id": parent_id}) + "\n", encoding="utf-8")
 
         graph = build_session_graph(parent, codex_home=self.home)
-        self.assertEqual(graph.root_session_id, "parent_session")
+        self.assertEqual(graph.root_session_id, parent_id)
+        self.assertEqual(graph.root_node.children[0].session_id, child_id)
         self.assertTrue(graph.family_sessions_count >= 1)
 
         storage_rep = analyze_storage(self.home)

@@ -6,12 +6,13 @@ from typing import Any
 
 from .evidence import collect_session_evidence
 from .lifecycle_truth import classify_subagent_lifecycle, scan_durable_lifecycle
-from .spawn_edges import inspect_thread_spawn_edge
+from .spawn_edges import SPAWN_EDGE_UNKNOWN, inspect_thread_spawn_edge
+from .thread_identity import parse_rollout_filename
 
 
 @dataclass
 class GraphNode:
-    session_id: str
+    session_id: str | None
     session_path: str
     depth: int = 0
     parent_id: str | None = None
@@ -26,6 +27,7 @@ class GraphNode:
     dispatchable: bool | None = None
     finding_ids: list[str] = field(default_factory=list)
     spawn_edge: dict[str, Any] = field(default_factory=dict)
+    thread_identity: dict[str, Any] = field(default_factory=dict)
     is_archived: bool = False
     is_orphan: bool = False
 
@@ -45,6 +47,7 @@ class GraphNode:
             "dispatchable": self.dispatchable,
             "finding_ids": list(self.finding_ids),
             "spawn_edge": dict(self.spawn_edge),
+            "thread_identity": dict(self.thread_identity),
             "is_archived": self.is_archived,
             "is_orphan": self.is_orphan,
             "children": [c.to_dict() for c in self.children],
@@ -53,7 +56,7 @@ class GraphNode:
 
 @dataclass
 class SessionGraph:
-    root_session_id: str
+    root_session_id: str | None
     family_sessions_count: int = 1
     max_depth: int = 0
     aggregate_family_bytes: int = 0
@@ -70,7 +73,7 @@ class SessionGraph:
 
     def render_text(self) -> str:
         lines: list[str] = []
-        lines.append(f"Session Family Graph: {self.root_session_id}")
+        lines.append(f"Session Family Graph: {self.root_session_id or 'UNKNOWN'}")
         lines.append(
             f"Family sessions: {self.family_sessions_count} | "
             f"Aggregate bytes: {self.aggregate_family_bytes} | Max depth: {self.max_depth}\n"
@@ -80,7 +83,7 @@ class SessionGraph:
             status_flag = f"[{node.lifecycle_status}]"
             orphan_flag = " (ORPHAN)" if node.is_orphan else ""
             lines.append(
-                f"{indent}├── {node.session_id} {status_flag}{orphan_flag} "
+                f"{indent}├── {node.session_id or 'UNKNOWN'} {status_flag}{orphan_flag} "
                 f"({node.size_bytes} bytes, {node.turn_count} turns)"
             )
             for child in node.children:
@@ -97,26 +100,46 @@ def _runtime_active(evidence: Any) -> bool | None:
     return None
 
 
+def _unknown_spawn_edge(*, parent_id: str | None, child_id: str | None, reason: str) -> dict[str, Any]:
+    return {
+        "status": SPAWN_EDGE_UNKNOWN,
+        "parent_thread_id": parent_id,
+        "child_thread_id": child_id,
+        "db_path": None,
+        "reason": reason,
+    }
+
+
 def _lifecycle_node_fields(
     path: Path,
     evidence: Any,
     *,
-    session_id: str,
+    session_id: str | None,
     parent_id: str | None,
     codex_home: Path | str | None,
 ) -> dict[str, Any]:
     durable = scan_durable_lifecycle(path)
-    spawn_edge = inspect_thread_spawn_edge(
-        path,
-        child_thread_id=session_id,
-        parent_thread_id=parent_id,
-        codex_home=codex_home,
-    )
+    if session_id is None:
+        spawn_edge_dict = _unknown_spawn_edge(
+            parent_id=parent_id,
+            child_id=None,
+            reason="logical ThreadId is unresolved; spawn-edge correlation was not attempted",
+        )
+        spawn_edge_status = SPAWN_EDGE_UNKNOWN
+    else:
+        spawn_edge = inspect_thread_spawn_edge(
+            path,
+            child_thread_id=session_id,
+            parent_thread_id=parent_id,
+            codex_home=codex_home,
+        )
+        spawn_edge_dict = spawn_edge.to_dict()
+        spawn_edge_status = spawn_edge.status
     truth = classify_subagent_lifecycle(
         durable_state=durable.state,
         runtime_active=_runtime_active(evidence),
         presentation_active=None,
-        spawn_edge_status=spawn_edge.status,
+        spawn_edge_status=spawn_edge_status,
     )
     legacy_status = {
         "WORKING": "active",
@@ -132,7 +155,8 @@ def _lifecycle_node_fields(
         "presentation_state": truth.presentation_state,
         "dispatchable": truth.dispatchable,
         "finding_ids": list(truth.findings),
-        "spawn_edge": spawn_edge.to_dict(),
+        "spawn_edge": spawn_edge_dict,
+        "thread_identity": evidence.thread_identity.to_dict(),
     }
 
 
@@ -143,7 +167,11 @@ def _find_child_path(parent_path: Path, child_id: str) -> Path | None:
         matches = sorted(search_dir.glob(f"*{child_id}*.jsonl"), key=lambda item: str(item))
     except OSError:
         return None
-    return matches[0] if matches else None
+    for match in matches:
+        parsed = parse_rollout_filename(match)
+        if parsed is not None and parsed.thread_id == child_id:
+            return match
+    return None
 
 
 def build_session_graph(
@@ -154,16 +182,18 @@ def build_session_graph(
     path = Path(session_path).resolve()
     root_ev = collect_session_evidence(path, codex_home=codex_home)
     seen_paths: set[Path] = {path}
-    seen_ids: set[str] = {root_ev.session_id}
+    seen_ids: set[str] = set()
+    if root_ev.session_id:
+        seen_ids.add(root_ev.session_id)
 
     def _make_node(
         node_path: Path,
         evidence: Any,
         *,
-        session_id: str,
         depth: int,
         parent_id: str | None,
     ) -> GraphNode:
+        session_id = evidence.session_id
         fields = _lifecycle_node_fields(
             node_path,
             evidence,
@@ -185,7 +215,6 @@ def build_session_graph(
     root_node = _make_node(
         path,
         root_ev,
-        session_id=root_ev.session_id,
         depth=0,
         parent_id=root_ev.rollout.parent_id,
     )
@@ -224,12 +253,16 @@ def build_session_graph(
                 continue
 
             child_ev = collect_session_evidence(resolved, codex_home=codex_home)
+            # The parent hint is only a lookup hint. The child rollout must
+            # independently resolve to the same logical ThreadId before it is
+            # attached to the family graph.
+            if child_ev.session_id != child_id:
+                continue
             seen_paths.add(resolved)
             seen_ids.add(child_id)
             child_node = _make_node(
                 resolved,
                 child_ev,
-                session_id=child_id,
                 depth=depth + 1,
                 parent_id=parent_node.session_id,
             )

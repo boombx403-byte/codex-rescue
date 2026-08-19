@@ -20,13 +20,13 @@ from .discovery import (
     codex_home_path,
     lightweight_scan,
 )
+from .thread_identity import parse_rollout_filename
 from .thread_store import WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE
 from .windows_paths import compare_windows_paths, path_identity as _path_identity
 
 
 MAX_DB_INVENTORY_ROWS = 100_000
 MAX_DB_CANDIDATES = 32
-_UUID_RE = re.compile(r"(?i)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 _WINDOWS_ABSOLUTE_RE = re.compile(
     r"(?i)^(?:[a-z]:[\\/]|(?:\\\\\?\\|//\?/)(?:[a-z]:[\\/]|UNC[\\/])|(?:\\\\|//)(?![?.][\\/]))"
 )
@@ -78,13 +78,11 @@ class _Candidate:
 
 
 def _thread_id_from_path(path: Path) -> str | None:
-    match = _UUID_RE.search(path.name)
-    return match.group(1) if match else None
+    parsed = parse_rollout_filename(path)
+    return parsed.thread_id if parsed else None
 
 
 def path_identity(value: str | os.PathLike[str]) -> str:
-    """Normalize supported local/Windows/WSL spellings without filesystem mutation."""
-
     return _path_identity(value)
 
 
@@ -257,6 +255,7 @@ def _wrap(
         mtime=max(summary.mtime, inventory.updated_at if inventory else 0.0),
         size=summary.size,
         archived=summary.archived or bool(inventory and inventory.archived),
+        thread_identity=summary.thread_identity,
         indexed=indexed,
         exists=True,
         inventory_mismatch=mismatch,
@@ -275,8 +274,6 @@ def discover_sessions(
     tail_bytes: int = DEFAULT_TAIL_BYTES,
     prompt_limit: int = DEFAULT_PROMPT_LIMIT,
 ) -> list[Alpha5SessionSummary]:
-    """Merge filesystem rollout truth with read-only SQLite inventory enrichment."""
-
     root = codex_home_path(codex_home)
     inventory_rows, inventory_available, inventory_unknown = _read_inventory(root)
     candidates: list[_Candidate] = []

@@ -34,6 +34,7 @@ jobs:
 
       - name: Qualify Windows diagnostic boundaries
         run: |
+          python -m unittest discover -s tests -p "test_thread_identity.py" -v
           python -m unittest discover -s tests -p "test_windows_path_identity.py" -v
           python -m unittest discover -s tests -p "test_thread_spawn_edges.py" -v
           python -m unittest discover -s tests -p "test_lifecycle_truth.py" -v

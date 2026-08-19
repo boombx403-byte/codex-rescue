@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .thread_identity import ThreadIdentityEvidence, resolve_thread_identity
+
 
 DEFAULT_HEAD_BYTES = 64 * 1024
 DEFAULT_TAIL_BYTES = 128 * 1024
@@ -28,9 +30,6 @@ _ROLLOUT_NAME = "rollout-*.jsonl"
 _CALL_TYPES = {"function_call", "custom_tool_call", "tool_search_call"}
 _OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output", "tool_search_output"}
 _SECRET_PATTERNS = (
-    # Keep common credentials out of the bounded prompt preview.  This is
-    # deliberately conservative; the raw rollout is never returned by this
-    # module, but previews can still contain user supplied sensitive text.
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"), "[REDACTED_SECRET]"),
     (re.compile(r"\b(?:rk|pk)-[A-Za-z0-9_-]{16,}\b"), "[REDACTED_SECRET]"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{8,}\b"), "[REDACTED_SECRET]"),
@@ -49,13 +48,7 @@ _SECRET_PATTERNS = (
 
 @dataclass(frozen=True)
 class SessionSummary:
-    """Bounded metadata and health hint for one rollout file.
-
-    ``path`` is a resolved :class:`~pathlib.Path`, while :meth:`to_dict`
-    converts it to a string for JSON output.  ``status`` is intentionally a
-    small UI-oriented classification (``healthy``, ``suspicious`` or
-    ``damaged``); it is not a replacement for the detailed doctor result.
-    """
+    """Bounded metadata and health hint for one rollout file."""
 
     path: Path
     session_id: str | None
@@ -68,11 +61,10 @@ class SessionSummary:
     mtime: float
     size: int
     archived: bool = False
+    thread_identity: ThreadIdentityEvidence | None = None
 
     @property
     def rollout_path(self) -> Path:
-        """Compatibility alias used by callers that call it a rollout."""
-
         return self.path
 
     @property
@@ -96,12 +88,11 @@ class SessionSummary:
         return datetime.fromtimestamp(self.mtime, tz=timezone.utc).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a stable, bounded JSON-friendly representation."""
-
         return {
             "path": str(self.path),
             "rollout_path": str(self.path),
             "session_id": self.session_id,
+            "thread_identity": self.thread_identity.to_dict() if self.thread_identity else None,
             "cwd": self.cwd,
             "repo": self.repo,
             "first_prompt": self.first_prompt,
@@ -117,9 +108,6 @@ class SessionSummary:
             "archived": self.archived,
         }
 
-    # A light mapping interface makes summaries convenient for code that wants
-    # to pass them straight to a JSON/status renderer without forcing callers
-    # to know whether discovery returned objects or dictionaries.
     def __getitem__(self, key: str) -> Any:
         return self.to_dict()[key]
 
@@ -143,12 +131,6 @@ class _Scan:
 
 
 def codex_home_path(codex_home: str | os.PathLike[str] | None = None) -> Path:
-    """Resolve the Codex home used for discovery.
-
-    An explicit path wins, then ``CODEX_HOME``.  The fallback mirrors the
-    Codex default on Windows and other platforms (``~/.codex``).
-    """
-
     raw = codex_home
     if raw is None:
         raw = os.environ.get("CODEX_HOME")
@@ -158,13 +140,10 @@ def codex_home_path(codex_home: str | os.PathLike[str] | None = None) -> Path:
 
 
 def _rollout_paths(root: Path, include_archived: bool) -> list[Path]:
-    """Enumerate rollout names without opening their contents."""
-
     search_roots: list[tuple[Path, bool]] = []
     sessions = root / "sessions"
     if sessions.is_dir():
         search_roots.append((sessions, False))
-    # Accept a sessions directory itself as an explicit test/developer root.
     if root.name.lower() == "sessions" and root.is_dir():
         search_roots.append((root, False))
     if include_archived:
@@ -192,8 +171,6 @@ def _rollout_paths(root: Path, include_archived: bool) -> list[Path]:
 
 
 def _read_windows(path: Path, head_bytes: int, tail_bytes: int) -> tuple[_Window, _Window]:
-    """Read bounded head/tail windows and no other file content."""
-
     stat = path.stat()
     size = max(0, int(stat.st_size))
     head_limit = max(1, int(head_bytes))
@@ -216,14 +193,6 @@ def _read_windows(path: Path, head_bytes: int, tail_bytes: int) -> tuple[_Window
 
 
 def _iter_lines(window: _Window, *, tail: bool) -> Iterator[bytes]:
-    """Yield only complete records in a bounded window.
-
-    A tail commonly starts in the middle of a JSON line; that fragment is
-    deliberately skipped.  Likewise, an incomplete final head fragment is
-    skipped when the head window ends before the file does.  This prevents the
-    bounded scanner from mistaking an ordinary window boundary for corruption.
-    """
-
     parts = window.data.splitlines(keepends=True)
     for index, raw in enumerate(parts):
         if not raw:
@@ -313,27 +282,28 @@ def _scan_window(window: _Window, *, tail: bool, prompt_limit: int) -> _Scan:
     return _Scan(tuple(records), malformed, tuple(prompts))
 
 
-def _metadata(records: tuple[dict[str, Any], ...], path: Path) -> tuple[str | None, str | None, str | None]:
-    session_id: str | None = None
+def _metadata(
+    records: tuple[dict[str, Any], ...],
+    path: Path,
+) -> tuple[str | None, str | None, str | None, ThreadIdentityEvidence]:
+    session_meta: dict[str, Any] | None = None
     cwd: str | None = None
     repo: str | None = None
     for record in records:
         payload = _payload(record)
-        if record.get("type") == "session_meta" or payload.get("session_id") or payload.get("cwd"):
-            session_id = session_id or _string(payload.get("session_id") or payload.get("id"))
+        if record.get("type") == "session_meta" and session_meta is None:
+            session_meta = dict(payload)
+        if record.get("type") == "session_meta" or payload.get("cwd"):
             cwd = cwd or _string(payload.get("cwd") or payload.get("worktree") or payload.get("workspace"))
             value = payload.get("repo") or payload.get("repo_name") or payload.get("repository") or payload.get("project")
             if isinstance(value, dict):
                 value = value.get("name") or value.get("path")
             repo = repo or _string(value)
-        session_id = session_id or _string(record.get("session_id"))
         cwd = cwd or _string(record.get("cwd"))
-    if session_id is None:
-        stem = path.stem
-        session_id = stem[len("rollout-") :] if stem.startswith("rollout-") else stem
+    identity = resolve_thread_identity(path, session_meta=session_meta)
     if repo is None and cwd:
         repo = ntpath.basename(cwd.rstrip("\\/")) or None
-    return session_id, cwd, repo
+    return identity.thread_id, cwd, repo, identity
 
 
 def _string(value: Any) -> str | None:
@@ -368,15 +338,13 @@ def lightweight_scan(
     prompt_limit: int = DEFAULT_PROMPT_LIMIT,
     archived: bool | None = None,
 ) -> SessionSummary:
-    """Inspect one rollout using only bounded head/tail reads."""
-
     source = Path(path).expanduser().resolve()
     stat = source.stat()
     head_window, tail_window = _read_windows(source, head_bytes, tail_bytes)
     head = _scan_window(head_window, tail=False, prompt_limit=prompt_limit)
     tail = _scan_window(tail_window, tail=True, prompt_limit=prompt_limit)
     records = head.records + tail.records
-    session_id, cwd, repo = _metadata(records, source)
+    session_id, cwd, repo, thread_identity = _metadata(records, source)
     prompts = head.prompts + tail.prompts
     malformed_tail = tail.malformed
     unfinished = _tail_findings(tail.records)
@@ -391,6 +359,12 @@ def lightweight_scan(
     else:
         status = "healthy"
         reason = None
+    if thread_identity.conflict:
+        if status == "healthy":
+            status = "suspicious"
+            reason = "thread identity conflict"
+        elif reason:
+            reason += "; thread identity conflict"
     if archived is None:
         archived = "archived_sessions" in {part.lower() for part in source.parts}
     return SessionSummary(
@@ -405,6 +379,7 @@ def lightweight_scan(
         mtime=stat.st_mtime,
         size=stat.st_size,
         archived=bool(archived),
+        thread_identity=thread_identity,
     )
 
 
@@ -417,8 +392,6 @@ def discover_sessions(
     tail_bytes: int = DEFAULT_TAIL_BYTES,
     prompt_limit: int = DEFAULT_PROMPT_LIMIT,
 ) -> list[SessionSummary]:
-    """Return recent Codex sessions sorted by rollout mtime descending."""
-
     root = codex_home_path(codex_home)
     candidates: list[tuple[float, int, Path, bool]] = []
     for path in _rollout_paths(root, include_archived):
@@ -444,8 +417,6 @@ def discover_sessions(
                 )
             )
         except (OSError, ValueError):
-            # A rollout can disappear while the user is writing it.  Discovery
-            # is best-effort; leave it out and let a later invocation retry.
             continue
     return results
 
@@ -455,8 +426,6 @@ def resolve_latest(
     *,
     include_archived: bool = True,
 ) -> Path | None:
-    """Resolve the most recently modified rollout, or ``None`` if absent."""
-
     root = codex_home_path(codex_home)
     candidates: list[tuple[float, Path]] = []
     for path in _rollout_paths(root, include_archived):

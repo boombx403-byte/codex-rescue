@@ -15,6 +15,7 @@ from .gitstate import GitStateError, inspect_git_state
 from .migration_consistency import MigrationConsistencyReport, inspect_migration_consistency
 from .projection import inspect_projection_parity
 from .schema_compat import SchemaCompatibilityReport, apply_schema_compatibility
+from .thread_identity import THREAD_IDENTITY_CONFLICT, ThreadIdentityEvidence, resolve_thread_identity
 from .thread_store import ThreadStoreReport, inspect_thread_store
 from .transcript import ParseResult, parse_transcript
 
@@ -42,6 +43,7 @@ SEVERITY = [
     "THREAD_NAME_METADATA_DIVERGED",
     "INTERRUPTED_INPUT_NOT_DURABLE",
     "WORKSPACE_CONTEXT_MISMATCH",
+    "THREAD_IDENTITY_CONFLICT",
     "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
     "HEALTHY",
 ]
@@ -62,6 +64,7 @@ class DoctorResult:
     migration_consistency: MigrationConsistencyReport
     thread_store: ThreadStoreReport
     source_integrity: dict[str, Any]
+    thread_identity: ThreadIdentityEvidence
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +72,7 @@ class DoctorResult:
             "status": self.status,
             "findings": self.findings,
             "source_integrity": self.source_integrity,
+            "thread_identity": self.thread_identity.to_dict(),
             "thread_store": self.thread_store.to_dict(),
             "transcript": self.transcript.to_dict(),
             "repository": self.repository,
@@ -192,13 +196,14 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         "findings": _ordered_findings(source_findings),
     }
 
-    session_id = parsed.session_metadata.get("id") or parsed.session_metadata.get("session_id")
-    if session_id is not None:
-        session_id = str(session_id)
-    thread_store = inspect_thread_store(path, session_id=session_id)
+    session_meta = parsed.session_metadata if parsed.session_metadata else None
+    thread_identity = resolve_thread_identity(path, session_meta=session_meta)
+    thread_store = inspect_thread_store(path, session_id=thread_identity.thread_id)
 
     findings = set(source_findings)
     findings.update(thread_store.findings)
+    if thread_identity.conflict:
+        findings.add(THREAD_IDENTITY_CONFLICT)
     if not findings:
         findings.add("HEALTHY")
     ordered = _ordered_findings(findings)
@@ -217,4 +222,5 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         migration_consistency,
         thread_store,
         source_integrity,
+        thread_identity,
     )

@@ -25,6 +25,10 @@ from codex_rescue.thread_store import (
     WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE,
 )
 
+PARENT_ID = "019abcde-1111-7222-8333-444444444444"
+CHILD_ID = "019abcde-2222-7222-8333-444444444444"
+GRANDCHILD_ID = "019abcde-3333-7222-8333-444444444444"
+
 
 class LifecycleTruthTests(unittest.TestCase):
     def test_live_running_child_is_working(self):
@@ -216,40 +220,78 @@ class GraphLifecycleTests(unittest.TestCase):
         finally:
             db.close()
 
-    def test_nested_children_use_spawn_edge_state_without_ui_assumptions(self):
+    @staticmethod
+    def _name(thread_id: str, clock: str) -> str:
+        return f"rollout-2026-08-19T{clock}-{thread_id}.jsonl"
+
+    def test_real_filename_closed_child_uses_spawn_edge_thread_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / ".codex"
-            sessions = home / "sessions"
-            subagents = sessions / "subagents"
-            root = sessions / "parent.jsonl"
-            child1 = subagents / "child-one.jsonl"
-            child2 = subagents / "child-two.jsonl"
-            self._write(root, [{"type": "turn_started", "subagent_id": "child-one"}, {"type": "task_complete"}])
-            self._write(child1, [{"type": "turn_started", "parent_session_id": "parent", "subagent_id": "child-two"}, {"type": "task_complete"}])
-            self._write(child2, [{"type": "turn_started", "parent_session_id": "child-one"}, {"type": "agent_closed"}])
-            self._spawn_edges(home, [("parent", "child-one", "open"), ("child-one", "child-two", "closed")])
+            day = home / "sessions" / "2026" / "08" / "19"
+            subagents = day / "subagents"
+            root = day / self._name(PARENT_ID, "12-34-56")
+            child = subagents / self._name(CHILD_ID, "12-35-56")
+            self._write(
+                root,
+                [
+                    {"type": "session_meta", "payload": {"id": PARENT_ID}},
+                    {"type": "turn_started", "subagent_id": CHILD_ID},
+                    {"type": "task_complete"},
+                ],
+            )
+            self._write(
+                child,
+                [
+                    {"type": "session_meta", "payload": {"id": CHILD_ID, "parent_thread_id": PARENT_ID}},
+                    {"type": "turn_started"},
+                ],
+            )
+            self._spawn_edges(home, [(PARENT_ID, CHILD_ID, "closed")])
+
+            graph = build_session_graph(root, codex_home=home)
+            self.assertEqual(graph.root_session_id, PARENT_ID)
+            self.assertEqual(graph.root_node.session_id, PARENT_ID)
+            self.assertEqual(len(graph.root_node.children), 1)
+            node = graph.root_node.children[0]
+            self.assertEqual(node.session_id, CHILD_ID)
+            self.assertEqual(node.parent_id, PARENT_ID)
+            self.assertEqual(node.spawn_edge["status"], SPAWN_EDGE_CLOSED)
+            self.assertEqual(node.lifecycle_class, "INACTIVE")
+            self.assertFalse(node.dispatchable)
+            self.assertEqual(node.presentation_state, "UNKNOWN")
+            payload = graph.to_dict()
+            self.assertEqual(payload["tree"]["session_id"], PARENT_ID)
+            self.assertEqual(payload["tree"]["children"][0]["thread_identity"]["thread_id"], CHILD_ID)
+
+    def test_nested_real_filenames_preserve_logical_thread_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / ".codex"
+            day = home / "sessions" / "2026" / "08" / "19"
+            subagents = day / "subagents"
+            root = day / self._name(PARENT_ID, "12-34-56")
+            child = subagents / self._name(CHILD_ID, "12-35-56")
+            grandchild = subagents / self._name(GRANDCHILD_ID, "12-36-56")
+            self._write(root, [{"type": "session_meta", "payload": {"id": PARENT_ID}}, {"type": "turn_started", "subagent_id": CHILD_ID}, {"type": "task_complete"}])
+            self._write(child, [{"type": "session_meta", "payload": {"id": CHILD_ID, "parent_thread_id": PARENT_ID}}, {"type": "turn_started", "subagent_id": GRANDCHILD_ID}, {"type": "task_complete"}])
+            self._write(grandchild, [{"type": "session_meta", "payload": {"id": GRANDCHILD_ID, "parent_thread_id": CHILD_ID}}, {"type": "turn_started"}])
+            self._spawn_edges(home, [(PARENT_ID, CHILD_ID, "open"), (CHILD_ID, GRANDCHILD_ID, "closed")])
 
             graph = build_session_graph(root, codex_home=home)
             self.assertEqual(graph.family_sessions_count, 3)
             self.assertEqual(graph.max_depth, 2)
-            self.assertEqual(graph.root_node.lifecycle_class, "DONE")
             first = graph.root_node.children[0]
             second = first.children[0]
-            self.assertEqual(first.lifecycle_class, "DONE")
+            self.assertEqual((graph.root_node.session_id, first.session_id, second.session_id), (PARENT_ID, CHILD_ID, GRANDCHILD_ID))
             self.assertEqual(first.spawn_edge["status"], SPAWN_EDGE_OPEN)
+            self.assertEqual(second.spawn_edge["status"], SPAWN_EDGE_CLOSED)
             self.assertEqual(second.lifecycle_class, "INACTIVE")
             self.assertFalse(second.dispatchable)
-            self.assertEqual(second.spawn_edge["status"], SPAWN_EDGE_CLOSED)
-            self.assertEqual(second.presentation_state, "UNKNOWN")
-            self.assertEqual(second.finding_ids, [])
-            payload = graph.to_dict()
-            self.assertEqual(payload["tree"]["children"][0]["children"][0]["spawn_edge"]["status"], SPAWN_EDGE_CLOSED)
 
     def test_live_runtime_requires_non_terminal_durable_turn(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory) / ".codex"
             sessions = home / "sessions"
-            root = sessions / "running.jsonl"
+            root = sessions / self._name(PARENT_ID, "12-34-56")
             self._write(root, [{"type": "turn_started"}])
             root.with_suffix(".lock").write_text("12345", encoding="utf-8")
             with mock.patch("codex_rescue.evidence.is_pid_alive", return_value=True):

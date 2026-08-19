@@ -69,18 +69,9 @@ class WindowsPathIdentityTests(unittest.TestCase):
             ),
             NEVER_PERSISTED_TEMP_CHILD,
         )
-        self.assertEqual(
-            classify_rollout_presence(rollout_exists=False, db_row_present=True),
-            ROLLOUT_MISSING,
-        )
-        self.assertEqual(
-            classify_rollout_presence(rollout_exists=True, db_row_present=False),
-            INDEX_DIVERGENCE,
-        )
-        self.assertEqual(
-            classify_rollout_presence(rollout_exists=None, db_row_present=True),
-            "UNKNOWN",
-        )
+        self.assertEqual(classify_rollout_presence(rollout_exists=False, db_row_present=True), ROLLOUT_MISSING)
+        self.assertEqual(classify_rollout_presence(rollout_exists=True, db_row_present=False), INDEX_DIVERGENCE)
+        self.assertEqual(classify_rollout_presence(rollout_exists=None, db_row_present=True), "UNKNOWN")
 
     def test_unreadable_db_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -101,7 +92,7 @@ class WindowsPathIdentityTests(unittest.TestCase):
             sessions = root / "sessions"
             sessions.mkdir()
             thread_id = "019fffff-1000-7000-8000-000000001000"
-            rollout = sessions / f"rollout-{thread_id}.jsonl"
+            rollout = sessions / f"rollout-2026-08-19T00-00-00-{thread_id}.jsonl"
             rollout.write_text('{}\n', encoding="utf-8")
             resolved = str(rollout.resolve())
             extended = resolved if resolved.startswith("\\\\?\\") else "\\\\?\\" + resolved
@@ -131,7 +122,7 @@ class ThreadStoreContractTests(unittest.TestCase):
             thread_id = "019fffff-1001-7000-8000-000000001001"
             rollout = sessions / f"rollout-2026-08-19T00-00-00-{thread_id}.jsonl"
             records = [
-                {"type": "session_meta", "payload": {"id": thread_id, "session_id": thread_id}},
+                {"type": "session_meta", "payload": {"id": thread_id, "session_id": "029fffff-1001-7000-8000-000000001001"}},
                 {"type": "event_msg", "payload": {"type": "user_message", "message": "healthy"}},
             ]
             rollout.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
@@ -146,12 +137,15 @@ class ThreadStoreContractTests(unittest.TestCase):
                 db.close()
 
             result = doctor_session(rollout)
+            self.assertEqual(result.thread_identity.thread_id, thread_id)
+            self.assertEqual(result.thread_identity.metadata_field, "id")
             self.assertEqual(result.source_integrity["status"], "HEALTHY")
             self.assertEqual(result.thread_store.status, "DIVERGED")
             self.assertIn(WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE, result.findings)
             self.assertEqual(result.status, WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE)
 
             payload = result.to_dict()
+            self.assertEqual(payload["thread_identity"]["thread_id"], thread_id)
             self.assertEqual(payload["source_integrity"]["status"], "HEALTHY")
             self.assertEqual(payload["thread_store"]["status"], "DIVERGED")
             self.assertIn(WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE, payload["thread_store"]["findings"])
