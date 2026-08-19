@@ -45,6 +45,8 @@ class TestArea4DoctorFeatures(unittest.TestCase):
             "THREAD_NAME_METADATA_DIVERGED",
             "INTERRUPTED_INPUT_NOT_DURABLE",
             "WORKSPACE_CONTEXT_MISMATCH",
+            "THREAD_IDENTITY_CONFLICT",
+            "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
             "HEALTHY",
         ]
         self.assertEqual(list(SEVERITY), expected_order)

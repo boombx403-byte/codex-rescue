@@ -16,7 +16,7 @@
 </p>
 
 [![Release](https://img.shields.io/github/v/release/shleder/codex-rescue?include_prereleases&label=release&color=blue&style=flat-square)](https://github.com/shleder/codex-rescue/releases)
-[![npm version](https://img.shields.io/badge/npm-v0.1.0--alpha.6-brightgreen?style=flat-square)](https://www.npmjs.com/package/codex-rescue)
+[![npm version](https://img.shields.io/badge/npm-v0.1.0--alpha.6--3-brightgreen?style=flat-square)](https://www.npmjs.com/package/codex-rescue)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/shleder/codex-rescue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20local--first-success?style=flat-square)](https://github.com/shleder/codex-rescue)
@@ -31,16 +31,16 @@ Run instantly without installation (zero setup required):
 
 ```bash
 # Diagnostic inspection on your latest Codex session
-npx codex-rescue doctor --latest
+npx --yes codex-rescue doctor --latest
 
 # Batch analyze all local Codex sessions
-npx codex-rescue doctor --all
+npx --yes codex-rescue doctor --all
 
 # List and discover all local Codex sessions
-npx codex-rescue sessions
+npx --yes codex-rescue sessions
 
 # Explain any diagnostic finding code
-npx codex-rescue explain OVERSIZED_PAYLOAD
+npx --yes codex-rescue explain OVERSIZED_PAYLOAD
 ```
 
 Or install globally via npm:
@@ -186,9 +186,9 @@ codex-rescue report --latest -o report.html
 
 | Channel | Identifier | Status | Install Command |
 |---|---|---|---|
-| **npm (npx)** | `codex-rescue@0.1.0-alpha.6` | **Active** | `npx codex-rescue doctor --latest` |
-| **npm (global)** | `codex-rescue@0.1.0-alpha.6` | **Active** | `npm install -g codex-rescue` |
-| **GitHub Releases** | `v0.1.0-alpha.6` | **Active** | [Download Release Assets](https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha.6) |
+| **npm (npx)** | `codex-rescue` | **Active** | `npx --yes codex-rescue doctor --latest` |
+| **npm (global)** | `codex-rescue` | **Active** | `npm install -g codex-rescue` |
+| **GitHub Releases** | `v0.1.0-alpha.6-3` | **Active** | [Download Release Assets](https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha.6-3) |
 
 ---
 

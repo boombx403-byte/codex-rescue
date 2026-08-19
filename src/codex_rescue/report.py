@@ -35,9 +35,10 @@ def generate_html_report(
         "plan": plan.to_dict(),
     })
 
-    h_session = html.escape(ev.session_id)
-    h_status = html.escape(ev.status)
-    h_confidence = html.escape(ev.confidence)
+    display_session_id = ev.session_id or "UNKNOWN"
+    h_session = html.escape(display_session_id)
+    h_status = html.escape(ev.status or "UNKNOWN")
+    h_confidence = html.escape(ev.confidence or "UNKNOWN")
 
     findings_html = ""
     for f in (ev.findings or ["HEALTHY"]):
@@ -120,6 +121,6 @@ th {{ background: #f6f8fa; }}
 </body>
 </html>'''
 
-    target_file = Path(output_html_path) if output_html_path else Path(f"rescue_report_{ev.session_id}.html")
+    target_file = Path(output_html_path) if output_html_path else Path(f"rescue_report_{ev.session_id or 'unknown'}.html")
     target_file.write_text(html_content, encoding="utf-8")
     return str(target_file)

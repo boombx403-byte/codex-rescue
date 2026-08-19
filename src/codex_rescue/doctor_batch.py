@@ -12,6 +12,7 @@ from .discovery_alpha5 import discover_sessions
 from .doctor import doctor_session
 from .evidence import collect_session_evidence
 from .redact import sanitize_path
+from .thread_identity import parse_rollout_filename
 
 
 def compute_file_fingerprint(p: Path) -> dict[str, Any] | None:
@@ -43,6 +44,11 @@ def compute_file_fingerprint(p: Path) -> dict[str, Any] | None:
         return None
 
 
+def _filename_thread_id(path: Path) -> str | None:
+    parsed = parse_rollout_filename(path)
+    return parsed.thread_id if parsed else None
+
+
 @dataclass
 class BatchDoctorSummary:
     sessions_scanned: int = 0
@@ -67,7 +73,7 @@ class BatchDoctorSummary:
         ]
         for r in self.results:
             status_flag = r.get("status", "UNKNOWN")
-            session_ref = r.get("session_id") or Path(r.get("path", "")).stem
+            session_ref = r.get("session_id") or "UNKNOWN"
             findings_str = f" [{', '.join(r.get('findings', []))}]" if r.get("findings") else ""
             lines.append(f"  * {session_ref:<36} {status_flag}{findings_str}")
         return "\n".join(lines)
@@ -96,6 +102,8 @@ def run_doctor_all(
             doc_res = doctor_session(p, oversized_threshold=oversized_threshold)
             res_dict = doc_res.to_dict() if hasattr(doc_res, "to_dict") else dict(doc_res)
             st = str(res_dict.get("status", "UNKNOWN"))
+            identity = res_dict.get("thread_identity") if isinstance(res_dict.get("thread_identity"), dict) else {}
+            session_id = identity.get("thread_id")
 
             if st == "HEALTHY":
                 summary.healthy += 1
@@ -107,7 +115,7 @@ def run_doctor_all(
                 summary.warnings_findings += 1
 
             summary.results.append({
-                "session_id": p.stem,
+                "session_id": session_id,
                 "path": sanitize_path(p),
                 "status": st,
                 "findings": res_dict.get("findings", []),
@@ -115,7 +123,7 @@ def run_doctor_all(
         except Exception as e:
             summary.scan_failures += 1
             summary.results.append({
-                "session_id": p.stem,
+                "session_id": _filename_thread_id(p),
                 "path": sanitize_path(p),
                 "status": "SCAN_EXCEPTION",
                 "findings": ["SCAN_READ_ERROR"],
@@ -137,7 +145,7 @@ def run_doctor_changed(
     if c_file.exists():
         try:
             raw = json.loads(c_file.read_text(encoding="utf-8"))
-            if raw.get("version") == 2 and isinstance(raw.get("entries"), dict):
+            if raw.get("version") == 3 and isinstance(raw.get("entries"), dict):
                 cache_data = raw["entries"]
         except Exception:
             cache_data = {}
@@ -158,7 +166,6 @@ def run_doctor_changed(
         fp = compute_file_fingerprint(p)
 
         cached_entry = cache_data.get(p_str)
-        # Conservative fail-safe: if file was touched within last 2 seconds or fp missing or cache mismatched, rescan fully.
         is_cache_valid = (
             fp is not None
             and (now - fp.get("mtime", 0.0) >= 2.0)
@@ -167,11 +174,13 @@ def run_doctor_changed(
             and cached_entry.get("size") == fp["size"]
             and cached_entry.get("sample_hash") == fp["sample_hash"]
             and "status" in cached_entry
+            and "session_id" in cached_entry
         )
 
         if is_cache_valid and cached_entry:
             st = cached_entry["status"]
             findings = cached_entry.get("findings", [])
+            session_id = cached_entry.get("session_id")
             new_cache[p_str] = cached_entry
         else:
             try:
@@ -179,9 +188,12 @@ def run_doctor_changed(
                 res_dict = doc_res.to_dict() if hasattr(doc_res, "to_dict") else dict(doc_res)
                 st = str(res_dict.get("status", "UNKNOWN"))
                 findings = res_dict.get("findings", [])
+                identity = res_dict.get("thread_identity") if isinstance(res_dict.get("thread_identity"), dict) else {}
+                session_id = identity.get("thread_id")
             except Exception:
                 st = "SCAN_EXCEPTION"
                 findings = ["SCAN_READ_ERROR"]
+                session_id = _filename_thread_id(p)
 
             if fp:
                 new_cache[p_str] = {
@@ -191,6 +203,7 @@ def run_doctor_changed(
                     "mtime": fp["mtime"],
                     "status": st,
                     "findings": findings,
+                    "session_id": session_id,
                 }
 
         if st == "HEALTHY":
@@ -203,7 +216,7 @@ def run_doctor_changed(
             summary.warnings_findings += 1
 
         summary.results.append({
-            "session_id": p.stem,
+            "session_id": session_id,
             "path": sanitize_path(p),
             "status": st,
             "findings": findings,
@@ -212,7 +225,7 @@ def run_doctor_changed(
     try:
         c_file.parent.mkdir(parents=True, exist_ok=True)
         c_file.write_text(
-            json.dumps({"version": 2, "entries": new_cache}, indent=2, ensure_ascii=False),
+            json.dumps({"version": 3, "entries": new_cache}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception:

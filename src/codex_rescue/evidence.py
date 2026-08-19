@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from .redact import sanitize_path
+from .thread_identity import (
+    THREAD_IDENTITY_CONFLICT,
+    ThreadIdentityEvidence,
+    resolve_thread_identity,
+)
 from .transcript import _read_line_bounded, MAX_RECORD_BYTES
 
 
@@ -70,8 +75,9 @@ class WorkspaceMetrics:
 
 @dataclass
 class SessionEvidence:
-    session_id: str
+    session_id: str | None
     session_path: str
+    thread_identity: ThreadIdentityEvidence = field(default_factory=ThreadIdentityEvidence)
     is_archived: bool = False
     mtime: float = 0.0
     size_bytes: int = 0
@@ -150,9 +156,7 @@ def collect_session_evidence(
     max_scan_lines: int = 100_000,
 ) -> SessionEvidence:
     path = Path(session_path).resolve()
-    session_id = path.stem
-    if session_id.endswith(".jsonl"):
-        session_id = session_id[:-6]
+    initial_identity = resolve_thread_identity(path)
     is_archived = "archived_sessions" in str(path) or "archive" in path.parts
 
     mtime = 0.0
@@ -163,34 +167,15 @@ def collect_session_evidence(
         size_bytes = stat.st_size
 
     evidence = SessionEvidence(
-        session_id=session_id,
+        session_id=initial_identity.thread_id,
         session_path=str(path),
+        thread_identity=initial_identity,
         is_archived=is_archived,
         mtime=mtime,
         size_bytes=size_bytes,
     )
 
-    lock_candidates = [
-        path.with_suffix(".lock"),
-        path.parent / f"{path.name}.lock",
-        path.parent / f"{session_id}.lock",
-    ]
-    for lc in lock_candidates:
-        if lc.exists():
-            evidence.writer.lock_present = True
-            evidence.writer.lock_path = str(lc)
-            try:
-                lstat = lc.stat()
-                evidence.writer.lock_age_seconds = round(time.time() - lstat.st_mtime, 2)
-                content = lc.read_text(encoding="utf-8", errors="ignore").strip()
-                if content.isdigit():
-                    pid = int(content)
-                    evidence.writer.pid = pid
-                    evidence.writer.is_alive = is_pid_alive(pid)
-                    evidence.writer.runtime_surface = "cli" if evidence.writer.is_alive else "stale_lock"
-            except Exception:
-                pass
-            break
+    session_meta: dict[str, Any] | None = None
 
     if path.exists() and size_bytes > 0:
         try:
@@ -240,6 +225,13 @@ def collect_session_evidence(
                             if "MALFORMED_JSONL" not in evidence.findings:
                                 evidence.findings.append("MALFORMED_JSONL")
                         continue
+
+                    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+                    if record.get("type") == "session_meta" and session_meta is None:
+                        session_meta = dict(payload)
+                        parent = payload.get("parent_thread_id")
+                        if parent not in (None, "") and not evidence.rollout.parent_id:
+                            evidence.rollout.parent_id = str(parent)
 
                     rtype = record.get("type") or record.get("event") or "unknown"
                     evidence.rollout.records_by_type[rtype] = evidence.rollout.records_by_type.get(rtype, 0) + 1
@@ -297,6 +289,8 @@ def collect_session_evidence(
                         evidence.rollout.subagent_ids.append(str(subagent))
 
                     cwd = record.get("cwd") or record.get("working_directory") or record.get("workspace")
+                    if not cwd and record.get("type") == "session_meta":
+                        cwd = payload.get("cwd")
                     if cwd and not evidence.workspace.saved_cwd:
                         evidence.workspace.saved_cwd = str(cwd)
                         evidence.workspace.path_family = detect_path_family(str(cwd))
@@ -313,6 +307,38 @@ def collect_session_evidence(
         except Exception:
             if "SCAN_READ_ERROR" not in evidence.findings:
                 evidence.findings.append("SCAN_READ_ERROR")
+
+    evidence.thread_identity = resolve_thread_identity(path, session_meta=session_meta)
+    evidence.session_id = evidence.thread_identity.thread_id
+    if evidence.thread_identity.conflict and THREAD_IDENTITY_CONFLICT not in evidence.findings:
+        evidence.findings.append(THREAD_IDENTITY_CONFLICT)
+
+    lock_candidates = [
+        path.with_suffix(".lock"),
+        path.parent / f"{path.name}.lock",
+    ]
+    if evidence.session_id:
+        lock_candidates.append(path.parent / f"{evidence.session_id}.lock")
+    seen_locks: set[Path] = set()
+    for lc in lock_candidates:
+        if lc in seen_locks:
+            continue
+        seen_locks.add(lc)
+        if lc.exists():
+            evidence.writer.lock_present = True
+            evidence.writer.lock_path = str(lc)
+            try:
+                lstat = lc.stat()
+                evidence.writer.lock_age_seconds = round(time.time() - lstat.st_mtime, 2)
+                content = lc.read_text(encoding="utf-8", errors="ignore").strip()
+                if content.isdigit():
+                    pid = int(content)
+                    evidence.writer.pid = pid
+                    evidence.writer.is_alive = is_pid_alive(pid)
+                    evidence.writer.runtime_surface = "cli" if evidence.writer.is_alive else "stale_lock"
+            except Exception:
+                pass
+            break
 
     chome = Path(codex_home).resolve() if codex_home else path.parent.parent
     db_candidates = [
@@ -337,15 +363,19 @@ def collect_session_evidence(
                     if uv:
                         evidence.sqlite.schema_version = uv[0]
 
-                    for tbl in ("threads", "sessions", "conversations"):
-                        cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tbl}'")
-                        if cur.fetchone():
-                            cur.execute(f"SELECT * FROM {tbl} WHERE id=? OR id LIKE ? LIMIT 1", (session_id, f"%{session_id}%"))
-                            trow = cur.fetchone()
-                            if trow:
-                                evidence.sqlite.thread_found = True
-                                evidence.sqlite.thread_id = str(trow[0])
-                                break
+                    if evidence.session_id:
+                        for tbl in ("threads", "sessions", "conversations"):
+                            cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tbl}'")
+                            if cur.fetchone():
+                                cur.execute(
+                                    f"SELECT * FROM {tbl} WHERE id=? OR id LIKE ? LIMIT 1",
+                                    (evidence.session_id, f"%{evidence.session_id}%"),
+                                )
+                                trow = cur.fetchone()
+                                if trow:
+                                    evidence.sqlite.thread_found = True
+                                    evidence.sqlite.thread_id = str(trow[0])
+                                    break
                 finally:
                     conn.close()
             except Exception:

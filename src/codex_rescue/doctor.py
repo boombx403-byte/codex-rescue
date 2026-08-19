@@ -15,6 +15,8 @@ from .gitstate import GitStateError, inspect_git_state
 from .migration_consistency import MigrationConsistencyReport, inspect_migration_consistency
 from .projection import inspect_projection_parity
 from .schema_compat import SchemaCompatibilityReport, apply_schema_compatibility
+from .thread_identity import THREAD_IDENTITY_CONFLICT, ThreadIdentityEvidence, resolve_thread_identity
+from .thread_store import ThreadStoreReport, inspect_thread_store
 from .transcript import ParseResult, parse_transcript
 
 
@@ -41,6 +43,8 @@ SEVERITY = [
     "THREAD_NAME_METADATA_DIVERGED",
     "INTERRUPTED_INPUT_NOT_DURABLE",
     "WORKSPACE_CONTEXT_MISMATCH",
+    "THREAD_IDENTITY_CONFLICT",
+    "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
     "HEALTHY",
 ]
 
@@ -58,12 +62,18 @@ class DoctorResult:
     field_evidence: FieldEvidenceReport
     workspace_portability: WorkspacePortabilityReport
     migration_consistency: MigrationConsistencyReport
+    thread_store: ThreadStoreReport
+    source_integrity: dict[str, Any]
+    thread_identity: ThreadIdentityEvidence
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "session": self.session,
             "status": self.status,
             "findings": self.findings,
+            "source_integrity": self.source_integrity,
+            "thread_identity": self.thread_identity.to_dict(),
+            "thread_store": self.thread_store.to_dict(),
             "transcript": self.transcript.to_dict(),
             "repository": self.repository,
             "alpha5": self.alpha5.to_dict(),
@@ -86,6 +96,10 @@ def _classify_git_error(exc: GitStateError) -> str:
     return "git_unavailable_or_repository_inaccessible"
 
 
+def _ordered_findings(findings: set[str]) -> list[str]:
+    return sorted(findings, key=lambda item: SEVERITY.index(item) if item in SEVERITY else len(SEVERITY))
+
+
 def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> DoctorResult:
     parsed = parse_transcript(path, oversized_threshold=oversized_threshold)
     schema_compatibility = apply_schema_compatibility(parsed)
@@ -93,58 +107,58 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
     field_evidence = analyze_field_evidence(parsed)
     migration_consistency = inspect_migration_consistency(path, parsed)
     projection = inspect_projection_parity(path, parsed)
-    findings: set[str] = set()
+    source_findings: set[str] = set()
     if parsed.corruption_class:
-        findings.add(parsed.corruption_class)
+        source_findings.add(parsed.corruption_class)
     if parsed.oversized_records or parsed.oversized_record_count > 0:
-        findings.add("OVERSIZED_PAYLOAD")
+        source_findings.add("OVERSIZED_PAYLOAD")
         for rec in parsed.oversized_records:
             cls_name = rec.get("classification")
             if cls_name == "VALID_BUT_OVERSIZED":
-                findings.add("VALID_BUT_OVERSIZED")
+                source_findings.add("VALID_BUT_OVERSIZED")
             elif cls_name == "MALFORMED":
-                findings.add("MALFORMED_RECORD")
+                source_findings.add("MALFORMED_RECORD")
             elif cls_name == "TRUNCATED":
-                findings.add("TRUNCATED_TRANSCRIPT")
+                source_findings.add("TRUNCATED_TRANSCRIPT")
     if alpha5.bounded_record_overflow_count > 0:
-        findings.add("OVERSIZED_PAYLOAD")
-        findings.add("VALID_BUT_OVERSIZED")
+        source_findings.add("OVERSIZED_PAYLOAD")
+        source_findings.add("VALID_BUT_OVERSIZED")
     if parsed.first_invalid_offset is not None and not parsed.corruption_class:
-        findings.add("UNKNOWN_CORRUPTION")
+        source_findings.add("UNKNOWN_CORRUPTION")
     if parsed.operational_schema_issues or parsed.correlation_ambiguities:
-        findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
+        source_findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
     if parsed.ordinal_mode not in {None, "legacy", "paginated"}:
-        findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
+        source_findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
     if parsed.ordinal_reuse:
-        findings.add("PERSISTED_PAGINATED_ORDINAL_REUSE")
+        source_findings.add("PERSISTED_PAGINATED_ORDINAL_REUSE")
     if parsed.ordinal_tracking_overflow:
-        findings.add("ORDINAL_ANALYSIS_INCOMPLETE")
+        source_findings.add("ORDINAL_ANALYSIS_INCOMPLETE")
     if parsed.unfinished_tool_calls:
-        findings.add("UNFINISHED_TOOL_CALL")
+        source_findings.add("UNFINISHED_TOOL_CALL")
     if parsed.compaction_state_loss:
-        findings.add("COMPACTION_STATE_LOSS")
+        source_findings.add("COMPACTION_STATE_LOSS")
 
     if alpha5.typed_id_violation_count:
-        findings.add("INVALID_PERSISTED_ITEM_ID")
+        source_findings.add("INVALID_PERSISTED_ITEM_ID")
     if alpha5.interleaved_writer_evidence:
-        findings.add("INTERLEAVED_WRITERS")
+        source_findings.add("INTERLEAVED_WRITERS")
     if alpha5.source_changed_during_scan:
-        findings.add("ACTIVE_WRITE_UNCERTAIN")
+        source_findings.add("ACTIVE_WRITE_UNCERTAIN")
     if alpha5.empty_rollout or alpha5.header_only_rollout or (parsed.valid_record_count == 0 and parsed.source_size > 0):
-        findings.add("INCOMPLETE_ROLLOUT")
+        source_findings.add("INCOMPLETE_ROLLOUT")
     if alpha5.malformed_opaque_field_count:
-        findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
+        source_findings.add("UNKNOWN_OPERATIONAL_SCHEMA")
 
     if field_evidence.interrupted_input_boundary_count:
-        findings.add("INTERRUPTED_INPUT_NOT_DURABLE")
-    findings.update(migration_consistency.findings)
+        source_findings.add("INTERRUPTED_INPUT_NOT_DURABLE")
+    source_findings.update(migration_consistency.findings)
 
     if projection.status == "wedged":
-        findings.add("WEDGED_PROJECTION")
+        source_findings.add("WEDGED_PROJECTION")
     elif projection.status == "active_write":
-        findings.add("ACTIVE_WRITE_UNCERTAIN")
+        source_findings.add("ACTIVE_WRITE_UNCERTAIN")
     elif projection.status == "unknown" and parsed.ordinal_mode == "paginated":
-        findings.add("PROJECTION_STATE_UNKNOWN")
+        source_findings.add("PROJECTION_STATE_UNKNOWN")
 
     cwd = parsed.session_metadata.get("cwd")
     workspace_portability = inspect_workspace_portability(cwd)
@@ -171,15 +185,33 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
             "git_unavailable_or_repository_inaccessible",
         }
     ):
-        findings.add("WORKSPACE_CONTEXT_MISMATCH")
+        source_findings.add("WORKSPACE_CONTEXT_MISMATCH")
 
+    source_status = "HEALTHY" if not source_findings else next(
+        (label for label in SEVERITY if label in source_findings),
+        "UNKNOWN_CORRUPTION",
+    )
+    source_integrity = {
+        "status": source_status,
+        "findings": _ordered_findings(source_findings),
+    }
+
+    session_meta = parsed.session_metadata if parsed.session_metadata else None
+    thread_identity = resolve_thread_identity(path, session_meta=session_meta)
+    thread_store = inspect_thread_store(path, session_id=thread_identity.thread_id)
+
+    findings = set(source_findings)
+    findings.update(thread_store.findings)
+    if thread_identity.conflict:
+        findings.add(THREAD_IDENTITY_CONFLICT)
     if not findings:
         findings.add("HEALTHY")
-    status = next(label for label in SEVERITY if label in findings)
+    ordered = _ordered_findings(findings)
+    status = next((label for label in SEVERITY if label in findings), ordered[0])
     return DoctorResult(
         str(Path(path).resolve()),
         status,
-        sorted(findings, key=SEVERITY.index),
+        ordered,
         parsed,
         repository,
         alpha5,
@@ -188,4 +220,7 @@ def doctor_session(path: str | Path, oversized_threshold: int = 1_000_000) -> Do
         field_evidence,
         workspace_portability,
         migration_consistency,
+        thread_store,
+        source_integrity,
+        thread_identity,
     )
