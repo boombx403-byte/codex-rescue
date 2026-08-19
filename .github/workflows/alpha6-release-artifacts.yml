@@ -42,7 +42,7 @@ jobs:
             platform_package: codex-rescue-darwin-arm64
             binary: codex-rescue
             artifact_binary: codex-rescue-darwin-arm64
-          - os: macos-13
+          - os: macos-15-intel
             platform_id: darwin-x64
             platform_package: codex-rescue-darwin-x64
             binary: codex-rescue
