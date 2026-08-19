@@ -3,61 +3,93 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const meta = require('../package.json');
 
-const targets = {
-  'linux-x64': [['codex-rescue-linux-x64'], 'codex-rescue'],
-  'win32-x64': [['codex-rescue-windows-x64', 'codex-rescue-win32-x64'], 'codex-rescue.exe'],
-  'darwin-arm64': [['codex-rescue-darwin-arm64'], 'codex-rescue'],
-  'darwin-x64': [['codex-rescue-darwin-x64'], 'codex-rescue'],
-};
+const targets = Object.freeze({
+  'linux-x64': Object.freeze({ packages: Object.freeze(['codex-rescue-linux-x64']), executable: 'codex-rescue' }),
+  'win32-x64': Object.freeze({
+    packages: Object.freeze(['codex-rescue-windows-x64', 'codex-rescue-win32-x64']),
+    executable: 'codex-rescue.exe',
+  }),
+  'darwin-arm64': Object.freeze({ packages: Object.freeze(['codex-rescue-darwin-arm64']), executable: 'codex-rescue' }),
+  'darwin-x64': Object.freeze({ packages: Object.freeze(['codex-rescue-darwin-x64']), executable: 'codex-rescue' }),
+});
 
-const key = `${process.platform}-${process.arch}`;
-const target = targets[key];
-if (!target) {
-  console.error(`codex-rescue: unsupported platform ${key}`);
-  process.exit(1);
+function getTarget(platform, arch) {
+  return targets[`${platform}-${arch}`] || null;
 }
 
-const [packageCandidates, executableName] = target;
-let packageJson;
-for (const p of packageCandidates) {
-  try {
-    packageJson = require.resolve(`${p}/package.json`);
-    break;
-  } catch {}
+function resolvePlatformPackage(target, resolver = require.resolve) {
+  for (const packageName of target.packages) {
+    try {
+      return {
+        packageName,
+        packageJson: resolver(`${packageName}/package.json`),
+      };
+    } catch {}
+  }
+  return null;
 }
 
-if (!packageJson) {
-  console.error(
-    `codex-rescue: platform package (${packageCandidates.join(' or ')}) is not installed. ` +
-    'This release expects npm to install the matching optional dependency.'
+function missingPackageMessage(platform, arch, target, version = meta.version) {
+  return (
+    `codex-rescue: platform binary package unavailable for ${platform}/${arch}. ` +
+    `Checked: ${target.packages.join(', ')}. ` +
+    `Reinstall codex-rescue@${version} with optional dependencies enabled ` +
+    `(npm install --include=optional codex-rescue@${version}) and retry.`
   );
-  process.exit(1);
 }
 
-const executable = path.join(path.dirname(packageJson), 'bin', executableName);
-const child = spawn(executable, process.argv.slice(2), {
-  stdio: 'inherit',
-  shell: false,
-  windowsHide: false,
-});
+function main() {
+  const platform = process.platform;
+  const arch = process.arch;
+  const target = getTarget(platform, arch);
+  if (!target) {
+    console.error(`codex-rescue: unsupported platform ${platform}/${arch}; no platform package will be executed.`);
+    process.exit(1);
+  }
 
-child.once('error', (error) => {
-  console.error(`codex-rescue: failed to start platform executable: ${error.message}`);
-  process.exitCode = 1;
-});
+  const resolved = resolvePlatformPackage(target);
+  if (!resolved) {
+    console.error(missingPackageMessage(platform, arch, target));
+    process.exit(1);
+  }
 
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-  if (process.platform === 'win32' && signal === 'SIGHUP') continue;
-  process.on(signal, () => {
-    if (!child.killed) child.kill(signal);
+  const executable = path.join(path.dirname(resolved.packageJson), 'bin', target.executable);
+  const child = spawn(executable, process.argv.slice(2), {
+    stdio: 'inherit',
+    shell: false,
+    windowsHide: false,
+  });
+
+  child.once('error', (error) => {
+    console.error(`codex-rescue: failed to start platform executable: ${error.message}`);
+    process.exitCode = 1;
+  });
+
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    if (process.platform === 'win32' && signal === 'SIGHUP') continue;
+    process.on(signal, () => {
+      if (!child.killed) child.kill(signal);
+    });
+  }
+
+  child.once('exit', (code, signal) => {
+    if (signal && process.platform !== 'win32') {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code === null ? 1 : code);
   });
 }
 
-child.once('exit', (code, signal) => {
-  if (signal && process.platform !== 'win32') {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code === null ? 1 : code);
-});
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  getTarget,
+  missingPackageMessage,
+  resolvePlatformPackage,
+  targets,
+};
