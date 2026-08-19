@@ -303,55 +303,97 @@ class PortableSessionEngine:
         target_codex_home: Path,
         plan: Optional[ImportPlan] = None,
         dry_run: bool = False,
+        stage_only: bool = False,
     ) -> Dict[str, Any]:
         active_plan = plan or PortableSessionEngine.plan_import(package_zip_path, target_codex_home)
         if not active_plan.safe_to_import:
-            return {"success": False, "action": "BLOCKED", "reason": active_plan.conflict_reason or "Import preconditions not satisfied"}
-
-        if dry_run:
-            return {"success": True, "action": "DRY_RUN_PASSED", "plan": active_plan.to_dict()}
-
-        manifest = PortableSessionEngine.inspect_package(package_zip_path)
-        target_path = Path(active_plan.target_rollout_path)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 1. Stream write payload to target
-        try:
-            with zipfile.ZipFile(package_zip_path, "r") as zf:
-                with zf.open(manifest.rollout_filename) as src, target_path.open("wb") as dst:
-                    shutil.copyfileobj(src, dst, length=65536)
-        except Exception as e:
-            if target_path.exists():
-                try:
-                    target_path.unlink()
-                except Exception:
-                    pass
-            return {"success": False, "action": "ROLLED_BACK", "reason": f"Failed to extract rollout payload: {e}"}
-
-        # 2. Verify extracted file hash
-        extracted_sha = compute_file_sha256(target_path)
-        if extracted_sha != manifest.rollout_sha256:
-            if target_path.exists():
-                try:
-                    target_path.unlink()
-                except Exception:
-                    pass
-            return {"success": False, "action": "ROLLED_BACK", "reason": "Extracted file hash verification failed"}
-
-        # 3. Policy: Do NOT manufacture fake state_5.sqlite or threads table
-        state_db = target_codex_home / "state_5.sqlite"
-        if not state_db.exists():
             return {
-                "success": True,
-                "action": "SOURCE_IMPORTED_DERIVED_STATE_NOT_REBUILT",
-                "session_id": manifest.session_id,
-                "target_path": str(target_path),
-                "note": "Canonical rollout imported; state DB not present in target environment.",
+                "success": False,
+                "action": "BLOCKED",
+                "stage": "BLOCKED",
+                "reason": active_plan.conflict_reason or "Import preconditions not satisfied",
+                "index_visible": False,
+                "surface_visible": False,
             }
 
+        if dry_run:
+            return {
+                "success": True,
+                "action": "DRY_RUN_PASSED",
+                "stage": "VALIDATED",
+                "plan": active_plan.to_dict(),
+                "index_visible": False,
+                "surface_visible": False,
+            }
+
+        manifest = PortableSessionEngine.inspect_package(package_zip_path)
+        
+        # Staging path in Rescue staging area or target if stage_only requested
+        staging_dir = target_codex_home / ".rescue_staging" if not stage_only else Path(active_plan.target_rollout_path).parent
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        staged_target = staging_dir / manifest.rollout_filename
+
+        # 1. Stream write payload to staging target
+        try:
+            with zipfile.ZipFile(package_zip_path, "r") as zf:
+                with zf.open(manifest.rollout_filename) as src, staged_target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst, length=65536)
+        except Exception as e:
+            if staged_target.exists():
+                try:
+                    staged_target.unlink()
+                except Exception:
+                    pass
+            return {
+                "success": False,
+                "action": "ROLLED_BACK",
+                "stage": "BLOCKED",
+                "reason": f"Failed to extract rollout payload: {e}",
+                "index_visible": False,
+                "surface_visible": False,
+            }
+
+        # 2. Verify extracted file hash
+        extracted_sha = compute_file_sha256(staged_target)
+        if extracted_sha != manifest.rollout_sha256:
+            if staged_target.exists():
+                try:
+                    staged_target.unlink()
+                except Exception:
+                    pass
+            return {
+                "success": False,
+                "action": "ROLLED_BACK",
+                "stage": "BLOCKED",
+                "reason": "Extracted file hash verification failed",
+                "index_visible": False,
+                "surface_visible": False,
+            }
+
+        if stage_only:
+            return {
+                "success": True,
+                "action": "STAGED",
+                "stage": "STAGED",
+                "session_id": manifest.session_id,
+                "target_path": str(staged_target),
+                "index_visible": False,
+                "surface_visible": False,
+            }
+
+        # 3. Live Codex import contract:
+        # Without a supported, official Codex session registration API,
+        # copying a JSONL is NOT INDEX_VISIBLE or SURFACE_VISIBLE.
+        # Direct derived SQLite mutation remains HOLD.
+        # Live import fails closed with IMPORT_BLOCKED.
         return {
-            "success": True,
-            "action": "IMPORTED",
+            "success": False,
+            "action": "IMPORT_BLOCKED",
+            "stage": "STAGED",
+            "reason": "NO_SUPPORTED_CODEX_REGISTRATION_PATH",
             "session_id": manifest.session_id,
-            "target_path": str(target_path),
+            "staging_path": str(staged_target),
+            "index_visible": False,
+            "surface_visible": False,
+            "note": "Session payload staged and verified; live Codex registration blocked because no supported registration path exists.",
         }

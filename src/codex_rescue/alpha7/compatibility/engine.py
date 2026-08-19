@@ -26,23 +26,39 @@ class CompatibilityReport:
     verdict: str
     rollout_schema_version: int
     sqlite_schema_version: int
-    rollout_schema_supported: bool
-    sqlite_schema_supported: bool
+    rollout_schema_known: bool
+    sqlite_schema_known: bool
+    read_only_supported: bool
+    mutation_schema_compatible: bool
     app_server_supported: bool
-    mutation_allowed: bool
+    mutation_allowed: bool = False  # Always False at compatibility level; mutation requires operational proof gate
+    mutation_hold_reason: str = "DIRECT_DERIVED_MUTATION_HOLD"
     read_only_diagnosis_allowed: bool = True
     rejection_reason: Optional[str] = None
     invariants: List[InvariantCheckResult] = field(default_factory=list)
+
+    @property
+    def rollout_schema_supported(self) -> bool:
+        return self.rollout_schema_known
+
+    @property
+    def sqlite_schema_supported(self) -> bool:
+        return self.sqlite_schema_known
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "verdict": self.verdict,
             "rollout_schema_version": self.rollout_schema_version,
             "sqlite_schema_version": self.sqlite_schema_version,
-            "rollout_schema_supported": self.rollout_schema_supported,
-            "sqlite_schema_supported": self.sqlite_schema_supported,
+            "rollout_schema_known": self.rollout_schema_known,
+            "sqlite_schema_known": self.sqlite_schema_known,
+            "rollout_schema_supported": self.rollout_schema_known,
+            "sqlite_schema_supported": self.sqlite_schema_known,
+            "read_only_supported": self.read_only_supported,
+            "mutation_schema_compatible": self.mutation_schema_compatible,
             "app_server_supported": self.app_server_supported,
             "mutation_allowed": self.mutation_allowed,
+            "mutation_hold_reason": self.mutation_hold_reason,
             "read_only_diagnosis_allowed": self.read_only_diagnosis_allowed,
             "rejection_reason": self.rejection_reason,
             "invariants": [
@@ -53,7 +69,11 @@ class CompatibilityReport:
 
 
 class CompatibilityEngine:
-    """Evaluates compatibility between Codex Rescue Alpha7 and environment schemas."""
+    """Evaluates compatibility between Codex Rescue Alpha7 and environment schemas.
+
+    IMPORTANT: Schema compatibility alone establishes read-only support.
+    It does NOT grant mutation permission (mutation_allowed=False).
+    """
 
     @staticmethod
     def evaluate(
@@ -64,25 +84,25 @@ class CompatibilityEngine:
         rollout_ok = rollout_schema in SUPPORTED_ROLLOUT_SCHEMAS
         sqlite_ok = sqlite_schema in SUPPORTED_SQLITE_SCHEMAS
         app_ok = app_server_protocol in ("v1", "v2")
+        schema_compatible = rollout_ok and sqlite_ok
 
         invariants = []
         inv_rollout = InvariantEngine.check_schema_support(
-            rollout_schema, SUPPORTED_ROLLOUT_SCHEMAS, is_mutation_operation=True
+            rollout_schema, SUPPORTED_ROLLOUT_SCHEMAS, is_mutation_operation=False
         )
         invariants.append(inv_rollout)
 
         inv_sqlite = InvariantEngine.check_schema_support(
-            sqlite_schema, SUPPORTED_SQLITE_SCHEMAS, is_mutation_operation=True
+            sqlite_schema, SUPPORTED_SQLITE_SCHEMAS, is_mutation_operation=False
         )
         invariants.append(inv_sqlite)
 
-        mutation_allowed = rollout_ok and sqlite_ok
-        reason = None
-        if not mutation_allowed:
+        rejection_reason = None
+        if not schema_compatible:
             if not rollout_ok:
-                reason = f"UNKNOWN_ROLLOUT_SCHEMA_{rollout_schema}"
+                rejection_reason = f"UNKNOWN_ROLLOUT_SCHEMA_{rollout_schema}"
             elif not sqlite_ok:
-                reason = f"UNKNOWN_SQLITE_SCHEMA_{sqlite_schema}"
+                rejection_reason = f"UNKNOWN_SQLITE_SCHEMA_{sqlite_schema}"
 
         if rollout_ok and sqlite_ok and app_ok:
             verdict = CompatibilityVerdict.SUPPORTED.value
@@ -97,11 +117,14 @@ class CompatibilityEngine:
             verdict=verdict,
             rollout_schema_version=rollout_schema,
             sqlite_schema_version=sqlite_schema,
-            rollout_schema_supported=rollout_ok,
-            sqlite_schema_supported=sqlite_ok,
+            rollout_schema_known=rollout_ok,
+            sqlite_schema_known=sqlite_ok,
+            read_only_supported=rollout_ok,
+            mutation_schema_compatible=schema_compatible,
             app_server_supported=app_ok,
-            mutation_allowed=mutation_allowed,
+            mutation_allowed=False,  # Mutation gate fails closed; HOLD
+            mutation_hold_reason="DIRECT_DERIVED_MUTATION_HOLD: Operation-level verification gate required",
             read_only_diagnosis_allowed=True,
-            rejection_reason=reason,
+            rejection_reason=rejection_reason,
             invariants=invariants,
         )
