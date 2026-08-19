@@ -6,6 +6,7 @@ from typing import Any
 
 from .evidence import collect_session_evidence
 from .lifecycle_truth import classify_subagent_lifecycle, scan_durable_lifecycle
+from .spawn_edges import inspect_thread_spawn_edge
 
 
 @dataclass
@@ -24,6 +25,7 @@ class GraphNode:
     presentation_state: str = "UNKNOWN"
     dispatchable: bool | None = None
     finding_ids: list[str] = field(default_factory=list)
+    spawn_edge: dict[str, Any] = field(default_factory=dict)
     is_archived: bool = False
     is_orphan: bool = False
 
@@ -42,6 +44,7 @@ class GraphNode:
             "presentation_state": self.presentation_state,
             "dispatchable": self.dispatchable,
             "finding_ids": list(self.finding_ids),
+            "spawn_edge": dict(self.spawn_edge),
             "is_archived": self.is_archived,
             "is_orphan": self.is_orphan,
             "children": [c.to_dict() for c in self.children],
@@ -94,12 +97,26 @@ def _runtime_active(evidence: Any) -> bool | None:
     return None
 
 
-def _lifecycle_node_fields(path: Path, evidence: Any) -> dict[str, Any]:
+def _lifecycle_node_fields(
+    path: Path,
+    evidence: Any,
+    *,
+    session_id: str,
+    parent_id: str | None,
+    codex_home: Path | str | None,
+) -> dict[str, Any]:
     durable = scan_durable_lifecycle(path)
+    spawn_edge = inspect_thread_spawn_edge(
+        path,
+        child_thread_id=session_id,
+        parent_thread_id=parent_id,
+        codex_home=codex_home,
+    )
     truth = classify_subagent_lifecycle(
         durable_state=durable.state,
         runtime_active=_runtime_active(evidence),
         presentation_active=None,
+        spawn_edge_status=spawn_edge.status,
     )
     legacy_status = {
         "WORKING": "active",
@@ -115,6 +132,7 @@ def _lifecycle_node_fields(path: Path, evidence: Any) -> dict[str, Any]:
         "presentation_state": truth.presentation_state,
         "dispatchable": truth.dispatchable,
         "finding_ids": list(truth.findings),
+        "spawn_edge": spawn_edge.to_dict(),
     }
 
 
@@ -146,7 +164,13 @@ def build_session_graph(
         depth: int,
         parent_id: str | None,
     ) -> GraphNode:
-        fields = _lifecycle_node_fields(node_path, evidence)
+        fields = _lifecycle_node_fields(
+            node_path,
+            evidence,
+            session_id=session_id,
+            parent_id=parent_id,
+            codex_home=codex_home,
+        )
         return GraphNode(
             session_id=session_id,
             session_path=evidence.session_path,

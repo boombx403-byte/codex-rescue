@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .spawn_edges import SPAWN_EDGE_CLOSED, SPAWN_EDGE_UNRECORDED
 from .thread_store import (
     ROLLOUT_MISSING,
     THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE,
@@ -32,10 +33,6 @@ _TERMINAL_TYPES = {
     "turn_interrupted",
     "agent_complete",
     "agent_completed",
-}
-_CLOSED_TYPES = {
-    "agent_closed",
-    "thread_closed",
 }
 
 
@@ -83,8 +80,16 @@ def classify_subagent_lifecycle(
     durable_state: str,
     runtime_active: bool | None,
     presentation_active: bool | None = None,
+    spawn_edge_status: str = SPAWN_EDGE_UNRECORDED,
 ) -> LifecycleTruth:
+    """Combine durable rollout, live runtime, and real spawn-edge evidence.
+
+    Desktop presentation is recorded for callers that possess real UI evidence,
+    but never participates in lifecycle precedence. The only authoritative
+    persisted close signal consumed here is thread_spawn_edges.status=closed.
+    """
     durable = durable_state.upper()
+    edge = spawn_edge_status.upper()
     runtime = "ACTIVE" if runtime_active is True else ("IDLE" if runtime_active is False else "UNKNOWN")
     presentation = (
         "ACTIVE"
@@ -92,7 +97,7 @@ def classify_subagent_lifecycle(
         else ("IDLE" if presentation_active is False else "UNKNOWN")
     )
 
-    if durable == "CLOSED":
+    if edge == SPAWN_EDGE_CLOSED:
         if runtime_active is True:
             return LifecycleTruth(
                 status="UNKNOWN",
@@ -100,7 +105,7 @@ def classify_subagent_lifecycle(
                 runtime_state=runtime,
                 presentation_state=presentation,
                 dispatchable=None,
-                reason="explicitly closed durable state conflicts with proven live runtime evidence",
+                reason="persisted spawn edge is closed but proven live runtime evidence conflicts",
             )
         return LifecycleTruth(
             status="INACTIVE",
@@ -108,7 +113,7 @@ def classify_subagent_lifecycle(
             runtime_state=runtime,
             presentation_state=presentation,
             dispatchable=False,
-            reason="explicit close is durable and no live runtime evidence overrides it",
+            reason="persisted spawn edge is closed and no conflicting live runtime is proven",
         )
 
     if runtime_active is True:
@@ -137,7 +142,7 @@ def classify_subagent_lifecycle(
             runtime_state=runtime,
             presentation_state=presentation,
             dispatchable=None,
-            reason="terminal durable state proves the turn ended but does not prove the child was closed",
+            reason="terminal rollout evidence proves the turn ended but does not prove the spawn edge was closed",
         )
 
     return LifecycleTruth(
@@ -146,7 +151,7 @@ def classify_subagent_lifecycle(
         runtime_state=runtime,
         presentation_state=presentation,
         dispatchable=None,
-        reason="available durable/runtime evidence does not establish current liveness",
+        reason="available durable/runtime/spawn-edge evidence does not establish current liveness",
     )
 
 
@@ -224,24 +229,36 @@ def classify_archive_failure(
     source_exists: bool | None,
     error_text: str | None,
     windows_identity_divergence: bool | None,
+    persisted_reference_divergence: bool | None = None,
 ) -> tuple[str, ...]:
+    """Classify only corroborated archive failure causes.
+
+    Error strings are non-authoritative operation evidence. They can explain an
+    observed failure to a human but cannot establish missing storage or a
+    persisted-reference/path root cause by themselves.
+    """
+    _ = error_text
     if source_exists is False:
         return (ROLLOUT_MISSING,)
     if source_exists is not True:
         return ()
     if windows_identity_divergence is True:
         return (WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE,)
-    text = (error_text or "").casefold()
-    if any(token in text for token in ("os error 2", "thread not found", "archive", "unarchive", "reference")):
+    if persisted_reference_divergence is True:
         return (THREAD_STORE_PATH_OR_REFERENCE_DIVERGENCE,)
     return ()
 
 
 def scan_durable_lifecycle(path: str | Path, *, max_lines: int = 100_000) -> DurableLifecycle:
+    """Scan supplementary rollout turn state without fabricating edge closure.
+
+    Current Codex spawn-edge closure is stored in SQLite thread_spawn_edges and
+    is inspected separately. Rollout event names such as agent_closed are not
+    treated as substitutes for that durable edge state.
+    """
     source = Path(path)
     last_event: str | None = None
     last_state = "UNKNOWN"
-    explicit_close = False
     lines = 0
     try:
         with source.open("rb") as stream:
@@ -254,7 +271,7 @@ def scan_durable_lifecycle(path: str | Path, *, max_lines: int = 100_000) -> Dur
                     return DurableLifecycle(
                         state="UNKNOWN",
                         last_event=last_event,
-                        explicit_close=explicit_close,
+                        explicit_close=False,
                         scan_complete=False,
                         reason="oversized lifecycle record prevents complete classification",
                     )
@@ -264,7 +281,7 @@ def scan_durable_lifecycle(path: str | Path, *, max_lines: int = 100_000) -> Dur
                     return DurableLifecycle(
                         state="UNKNOWN",
                         last_event=last_event,
-                        explicit_close=explicit_close,
+                        explicit_close=False,
                         scan_complete=False,
                         reason="malformed lifecycle record prevents complete classification",
                     )
@@ -276,7 +293,7 @@ def scan_durable_lifecycle(path: str | Path, *, max_lines: int = 100_000) -> Dur
                     payload.get("type"),
                     payload.get("event"),
                 ]
-                recognized = _START_TYPES | _TERMINAL_TYPES | _CLOSED_TYPES
+                recognized = _START_TYPES | _TERMINAL_TYPES
                 event = next(
                     (
                         str(value).casefold()
@@ -288,35 +305,30 @@ def scan_durable_lifecycle(path: str | Path, *, max_lines: int = 100_000) -> Dur
                 if event in _START_TYPES:
                     last_event = event
                     last_state = "NON_TERMINAL"
-                    explicit_close = False
                 elif event in _TERMINAL_TYPES:
                     last_event = event
                     last_state = "TERMINAL"
-                    explicit_close = False
-                elif event in _CLOSED_TYPES:
-                    last_event = event
-                    last_state = "CLOSED"
-                    explicit_close = True
             if lines >= max_lines:
                 return DurableLifecycle(
                     state="UNKNOWN",
                     last_event=last_event,
-                    explicit_close=explicit_close,
+                    explicit_close=False,
                     scan_complete=False,
                     reason="lifecycle scan limit reached",
                 )
     except OSError as exc:
         return DurableLifecycle(
             state="UNKNOWN",
+            explicit_close=False,
             scan_complete=False,
             reason=f"lifecycle source unreadable: {exc.__class__.__name__}",
         )
     return DurableLifecycle(
         state=last_state,
         last_event=last_event,
-        explicit_close=explicit_close,
+        explicit_close=False,
         scan_complete=True,
-        reason="latest recognized durable lifecycle marker classified",
+        reason="latest recognized rollout turn marker classified; spawn-edge closure is inspected separately",
     )
 
 

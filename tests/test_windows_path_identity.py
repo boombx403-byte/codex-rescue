@@ -151,6 +151,12 @@ class ThreadStoreContractTests(unittest.TestCase):
             self.assertIn(WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE, result.findings)
             self.assertEqual(result.status, WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE)
 
+            payload = result.to_dict()
+            self.assertEqual(payload["source_integrity"]["status"], "HEALTHY")
+            self.assertEqual(payload["thread_store"]["status"], "DIVERGED")
+            self.assertIn(WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE, payload["thread_store"]["findings"])
+            self.assertEqual(payload["status"], WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE)
+
 
 if __name__ == "__main__":
     unittest.main()
