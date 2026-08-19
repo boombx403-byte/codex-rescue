@@ -65,6 +65,9 @@ class IncidentReport:
         }
 
 
+from codex_rescue.alpha7.privacy.redaction import PrivacyRedactionEngine
+
+
 class IncidentEngine:
     """Reconstructs evidence-backed causal chains and identifies first bad state."""
 
@@ -80,6 +83,8 @@ class IncidentEngine:
         incident_id: str,
         events: List[StructuralEvent],
         start_time: Optional[float] = None,
+        rollout_status: Optional[str] = None,
+        validate_privacy: bool = False,
     ) -> IncidentReport:
         now = time.time()
         st = start_time or (events[0].timestamp if events else now)
@@ -139,6 +144,28 @@ class IncidentEngine:
             if first_bad else "All observed operations healthy."
         )
 
+        # Canonical rollout status must be derived from actual integrity evidence
+        canonical_status = rollout_status or ("UNKNOWN" if anomalies else "UNKNOWN")
+
+        # Confidence is evidence-derived, never blindly HIGH
+        if not events:
+            confidence = "UNKNOWN"
+        elif len(anomalies) > 0 and rollout_status is None:
+            confidence = "LOW"
+            unknown_fields.append("unverified_rollout_disk_status")
+        elif len(events) >= 2 and all(e.details.get("source") == "OBSERVED" for e in events):
+            confidence = "HIGH"
+        else:
+            confidence = "MEDIUM"
+
+        # Shareability: Default FALSE. Only TRUE if explicit privacy validation passes
+        is_shareable = False
+        if validate_privacy:
+            sanitized_summary, audit = PrivacyRedactionEngine.sanitize_text(rep_summary)
+            if audit.passed_validation and audit.secrets_found_and_redacted == 0:
+                is_shareable = True
+                rep_summary = sanitized_summary
+
         return IncidentReport(
             incident_id=incident_id,
             start_time=st,
@@ -150,13 +177,13 @@ class IncidentEngine:
             events_count=len(events),
             anomalies_count=len(anomalies),
             causal_chain=causal,
-            canonical_rollout_status="HEALTHY",
-            is_safe_shareable=True,
+            canonical_rollout_status=canonical_status,
+            is_safe_shareable=is_shareable,
             affected_logical_thread_ids=thread_ids,
             surfaces=surfaces,
             finding_ids=findings,
             evidence_provenance={"events_recorded": len(events), "anomalies": len(anomalies)},
-            confidence="HIGH" if len(events) > 0 else "UNKNOWN",
+            confidence=confidence,
             unknown_fields=unknown_fields,
             sanitized_reproduction_summary=rep_summary,
         )
