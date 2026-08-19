@@ -5,6 +5,7 @@ on:
     branches: [main, feat/alpha5-complete, feat/alpha6-product-features]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
