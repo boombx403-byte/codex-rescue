@@ -50,6 +50,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact source commit SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git checkout "$EXPECTED_SHA"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "Verified checkout SHA: $ACTUAL_SHA"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "ERROR: Checked-out SHA ($ACTUAL_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -114,6 +130,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact source commit SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git checkout "$EXPECTED_SHA"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "Verified checkout SHA: $ACTUAL_SHA"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "ERROR: Checked-out SHA ($ACTUAL_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -144,6 +176,24 @@ jobs:
     needs: [build-native-npm, build-top-package]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact source commit SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git checkout "$EXPECTED_SHA"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "Verified checkout SHA: $ACTUAL_SHA"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "ERROR: Checked-out SHA ($ACTUAL_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           pattern: alpha6-*
@@ -156,8 +206,12 @@ jobs:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, subprocess
           from pathlib import Path
+          actual_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          expected_sha = os.environ["EXPECTED_SHA"]
+          if actual_sha != expected_sha:
+              raise SystemExit(f"Verified SHA mismatch: {actual_sha} != {expected_sha}")
           root = Path('incoming')
           expected = {
               'codex-rescue-0.1.0-alpha.6-3.tgz',
@@ -186,7 +240,7 @@ jobs:
           (bundle_dir / 'SHA256SUMS').write_text(''.join(f'{d}  {n}\n' for d,n in rows), encoding='utf-8')
           manifest = {
               'release_tag': os.environ['RELEASE_TAG'],
-              'source_sha': os.environ['EXPECTED_SHA'],
+              'source_sha': actual_sha,
               'npm_version': '0.1.0-alpha.6-3',
               'npm_packages': [
                   'codex-rescue-linux-x64',
@@ -198,7 +252,7 @@ jobs:
               'artifacts': {n: d for d,n in rows},
           }
           (bundle_dir / 'release-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          print('Release bundle assembled successfully:')
+          print(f'Release bundle assembled successfully from verified SHA {actual_sha}:')
           for d, n in rows:
               print(f'  {d}  {n}')
           PY
