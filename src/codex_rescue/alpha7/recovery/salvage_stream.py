@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
+
+
+def compute_file_sha256_streaming(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
 class RecordClassification:
@@ -149,3 +161,70 @@ class StreamSalvageEngine:
             result.source_status = SourceStatus.HEALTHY
 
         return result
+
+    def salvage_to_target(self, source_path: Path, target_path: Path) -> SalvageManifest:
+        """Salvages valid prefix of damaged transcript to explicit target without in-place mutation."""
+        if not source_path.exists():
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+        if source_path.resolve() == target_path.resolve():
+            raise ValueError("Salvage target must not be the same as the source file (in-place mutation forbidden).")
+
+        scan_result = self.scan_file(source_path)
+        source_sha = compute_file_sha256_streaming(source_path)
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        salvaged_bytes = 0
+        with open(source_path, "rb") as src, open(target_path, "wb") as dst:
+            if scan_result.valid_prefix_bytes > 0:
+                remaining = scan_result.valid_prefix_bytes
+                while remaining > 0:
+                    chunk_to_read = min(self.chunk_size, remaining)
+                    buf = src.read(chunk_to_read)
+                    if not buf:
+                        break
+                    dst.write(buf)
+                    salvaged_bytes += len(buf)
+                    remaining -= len(buf)
+
+        target_sha = compute_file_sha256_streaming(target_path) if salvaged_bytes > 0 else ""
+
+        return SalvageManifest(
+            source_path=str(source_path.resolve()),
+            target_path=str(target_path.resolve()),
+            source_sha256=source_sha,
+            target_sha256=target_sha,
+            source_total_bytes=scan_result.total_bytes,
+            salvaged_bytes=salvaged_bytes,
+            valid_records_count=scan_result.valid_records_count,
+            oversized_records_count=scan_result.oversized_records_count,
+            malformed_records_count=scan_result.malformed_records_count,
+            source_status=scan_result.source_status,
+        )
+
+
+@dataclass
+class SalvageManifest:
+    source_path: str
+    target_path: str
+    source_sha256: str
+    target_sha256: str
+    source_total_bytes: int
+    salvaged_bytes: int
+    valid_records_count: int
+    oversized_records_count: int
+    malformed_records_count: int
+    source_status: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source_path": self.source_path,
+            "target_path": self.target_path,
+            "source_sha256": self.source_sha256,
+            "target_sha256": self.target_sha256,
+            "source_total_bytes": self.source_total_bytes,
+            "salvaged_bytes": self.salvaged_bytes,
+            "valid_records_count": self.valid_records_count,
+            "oversized_records_count": self.oversized_records_count,
+            "malformed_records_count": self.malformed_records_count,
+            "source_status": self.source_status,
+        }
