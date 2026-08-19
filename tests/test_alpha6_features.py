@@ -201,6 +201,48 @@ class Alpha6FeatureTests(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", html_text)
         self.assertIn("Codex Rescue Diagnostic Report", html_text)
 
+    def test_report_unknown_and_known_thread_identity_regression(self):
+        # A & B & C: Noncanonical rollout without SessionMeta.id => resolved ThreadId = None
+        s_unknown = self.home / "sessions" / "arbitrary_custom_name.jsonl"
+        s_unknown.write_text(
+            json.dumps({"type": "turn_started", "ordinal": 1}) + "\n" +
+            json.dumps({"type": "task_complete", "ordinal": 2}) + "\n",
+            encoding="utf-8",
+        )
+        custom_out = Path(self.tmp_dir.name) / "custom_unknown.html"
+        rep_path = generate_html_report(s_unknown, output_html_path=custom_out, codex_home=self.home)
+        self.assertEqual(rep_path, str(custom_out))
+        self.assertTrue(custom_out.exists())
+        html_unknown = custom_out.read_text(encoding="utf-8")
+        self.assertIn("Session ID: <code>UNKNOWN</code>", html_unknown)
+        self.assertIn("<title>Codex Rescue Report — UNKNOWN</title>", html_unknown)
+        self.assertNotIn("arbitrary_custom_name", html_unknown)
+        self.assertNotIn("<code>None</code>", html_unknown)
+
+        # D: Default output path when output_html_path is None and ThreadId is None
+        orig_cwd = os.getcwd()
+        try:
+            os.chdir(self.tmp_dir.name)
+            default_rep = generate_html_report(s_unknown, codex_home=self.home)
+            self.assertEqual(default_rep, "rescue_report_unknown.html")
+            self.assertTrue(Path("rescue_report_unknown.html").exists())
+            self.assertFalse(Path("rescue_report_None.html").exists())
+        finally:
+            os.chdir(orig_cwd)
+
+        # E: Canonical / known ThreadId still renders unchanged
+        known_id = "019abcde-9999-7222-8333-999999999999"
+        s_known = self.home / "sessions" / f"rollout-2026-08-19T13-00-00-{known_id}.jsonl"
+        s_known.write_text(
+            json.dumps({"type": "turn_started", "ordinal": 1}) + "\n",
+            encoding="utf-8",
+        )
+        known_out = Path(self.tmp_dir.name) / "known.html"
+        generate_html_report(s_known, output_html_path=known_out, codex_home=self.home)
+        html_known = known_out.read_text(encoding="utf-8")
+        self.assertIn(f"Session ID: <code>{known_id}</code>", html_known)
+        self.assertIn(f"<title>Codex Rescue Report — {known_id}</title>", html_known)
+
     def test_session_filters(self):
         s1 = self.home / "sessions" / "dup_1.jsonl"
         s1.write_text(json.dumps({"type": "turn_started"}) + "\n", encoding="utf-8")
