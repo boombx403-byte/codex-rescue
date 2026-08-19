@@ -15,6 +15,17 @@ from codex_rescue.alpha7.surfaces.app_server import RealAppServerClient
 from codex_rescue.alpha7.surfaces.detector import SurfaceDetector
 
 
+import enum
+
+
+class TrustVerdict(str, enum.Enum):
+    VERIFIED = "VERIFIED"
+    VERIFIED_WITH_LIMITATIONS = "VERIFIED_WITH_LIMITATIONS"
+    READ_ONLY_ONLY = "READ_ONLY_ONLY"
+    BLOCKED = "BLOCKED"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass
 class SelfTestItem:
     name: str
@@ -43,6 +54,8 @@ class SelfTestReport:
     backup_engine_status: str = "PASS"
     invariant_engine_status: str = "PASS"
     overall_status: str = "LIMITED"  # PASS, LIMITED, DEGRADED, FAIL
+    trust_verdict: str = TrustVerdict.VERIFIED_WITH_LIMITATIONS.value
+    trust_reason: str = "Rescue core runtime verified; environment operates in read-only diagnostic mode."
     total_checks: int = 0
     passed_checks: int = 0
     failed_checks: int = 0
@@ -51,6 +64,8 @@ class SelfTestReport:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "overall_status": self.overall_status,
+            "trust_verdict": self.trust_verdict,
+            "trust_reason": self.trust_reason,
             "rescue_runtime_status": self.rescue_runtime_status,
             "codex_binary_status": self.codex_binary_status,
             "codex_home_status": self.codex_home_status,
@@ -111,7 +126,37 @@ class SelfTestEngine:
             report.invariant_engine_status = "FAIL"
             report.rescue_runtime_status = "FAIL"
 
-        # 4. Check Codex binary availability (Environment)
+        # 4. Check Identity Parser capability (Rescue runtime)
+        try:
+            from codex_rescue.thread_identity import resolve_thread_identity
+            id_ev = resolve_thread_identity("rollout-2026-08-19T12-00-00-11111111-2222-3333-4444-555555555555.jsonl")
+            assert id_ev.thread_id == "11111111-2222-3333-4444-555555555555"
+            report.checks.append(SelfTestItem("identity_parser", True, status="PASS"))
+        except Exception as e:
+            report.checks.append(SelfTestItem("identity_parser", False, status="FAIL", error=str(e)))
+            report.rescue_runtime_status = "FAIL"
+
+        # 5. Check Privacy & Redaction capability (Rescue runtime)
+        try:
+            from codex_rescue.alpha7.privacy.redaction import RedactionEngine
+            redacted = RedactionEngine.redact_text("sk-ant-api03-secretkeyhere token")
+            assert "[REDACTED_API_KEY]" in redacted
+            report.checks.append(SelfTestItem("privacy_and_redaction", True, status="PASS"))
+        except Exception as e:
+            report.checks.append(SelfTestItem("privacy_and_redaction", False, status="FAIL", error=str(e)))
+            report.rescue_runtime_status = "FAIL"
+
+        # 6. Check Windows Path Equivalence capability (Rescue runtime)
+        try:
+            from codex_rescue.windows_paths import compare_windows_paths
+            cmp_res = compare_windows_paths(r"C:\Users\test\a", r"\\?\C:\Users\test\a")
+            assert cmp_res.relation == "EQUIVALENT"
+            report.checks.append(SelfTestItem("windows_path_equivalence", True, status="PASS"))
+        except Exception as e:
+            report.checks.append(SelfTestItem("windows_path_equivalence", False, status="FAIL", error=str(e)))
+            report.rescue_runtime_status = "FAIL"
+
+        # 7. Check Codex binary availability (Environment)
         codex_bin = shutil.which("codex")
         if codex_bin:
             report.codex_binary_status = "PASS"
@@ -120,7 +165,7 @@ class SelfTestEngine:
             report.codex_binary_status = "NOT_FOUND"
             report.checks.append(SelfTestItem("codex_binary", False, status="NOT_FOUND"))
 
-        # 5. Check CODEX_HOME accessibility (Environment)
+        # 8. Check CODEX_HOME accessibility (Environment)
         if home.exists() and os.access(str(home), os.R_OK):
             report.codex_home_status = "PASS"
             report.checks.append(SelfTestItem("codex_home", True, status="PASS", details={"path": str(home)}))
@@ -128,7 +173,7 @@ class SelfTestEngine:
             report.codex_home_status = "NOT_FOUND"
             report.checks.append(SelfTestItem("codex_home", False, status="NOT_FOUND"))
 
-        # 6. Check Codex State DB (Environment)
+        # 9. Check Codex State DB (Environment)
         state_db = home / "state_5.sqlite"
         if state_db.exists():
             fp = SchemaFingerprint.compute(state_db)
@@ -142,7 +187,7 @@ class SelfTestEngine:
             report.codex_state_status = "NOT_FOUND"
             report.checks.append(SelfTestItem("codex_state_db", False, status="NOT_FOUND"))
 
-        # 7. Check App Server Reachability (Environment)
+        # 10. Check App Server Reachability (Environment)
         if codex_bin:
             app_client = RealAppServerClient(home, timeout=2.0)
             if app_client.launch_stdio_server(binary_path=codex_bin):
@@ -166,15 +211,23 @@ class SelfTestEngine:
         report.passed_checks = sum(1 for c in report.checks if c.passed)
         report.failed_checks = report.total_checks - report.passed_checks
 
-        # Determine overall status model
+        # Determine overall status and trust verdict model
         if report.rescue_runtime_status == "FAIL":
             report.overall_status = "FAIL"
+            report.trust_verdict = TrustVerdict.BLOCKED.value
+            report.trust_reason = "Internal Rescue runtime verification failed; operations blocked."
         elif report.codex_state_status == "CORRUPT" or report.app_server_status == "FAILED":
             report.overall_status = "DEGRADED"
+            report.trust_verdict = TrustVerdict.READ_ONLY_ONLY.value
+            report.trust_reason = "Codex environment state is degraded; only read-only diagnosis permitted."
         elif report.codex_binary_status == "PASS" and (report.codex_state_status == "PASS" or report.app_server_status == "PASS"):
             report.overall_status = "PASS"
+            report.trust_verdict = TrustVerdict.VERIFIED.value
+            report.trust_reason = "Full Codex environment and Rescue runtime verified."
         else:
             # Clean Rescue runtime but empty/missing Codex state
             report.overall_status = "LIMITED"
+            report.trust_verdict = TrustVerdict.VERIFIED_WITH_LIMITATIONS.value
+            report.trust_reason = "Rescue core runtime verified; active Codex environment not fully populated."
 
         return report
