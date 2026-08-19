@@ -35,6 +35,13 @@ class IncidentReport:
     causal_chain: List[CausalStep] = field(default_factory=list)
     canonical_rollout_status: str = "HEALTHY"
     is_safe_shareable: bool = False
+    affected_logical_thread_ids: List[str] = field(default_factory=list)
+    surfaces: List[str] = field(default_factory=list)
+    finding_ids: List[str] = field(default_factory=list)
+    evidence_provenance: Dict[str, Any] = field(default_factory=dict)
+    confidence: str = "HIGH"
+    unknown_fields: List[str] = field(default_factory=list)
+    sanitized_reproduction_summary: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -48,6 +55,13 @@ class IncidentReport:
             "causal_chain": [c.to_dict() for c in self.causal_chain],
             "canonical_rollout_status": self.canonical_rollout_status,
             "is_safe_shareable": self.is_safe_shareable,
+            "affected_logical_thread_ids": self.affected_logical_thread_ids,
+            "surfaces": self.surfaces,
+            "finding_ids": self.finding_ids,
+            "evidence_provenance": self.evidence_provenance,
+            "confidence": self.confidence,
+            "unknown_fields": self.unknown_fields,
+            "sanitized_reproduction_summary": self.sanitized_reproduction_summary,
         }
 
 
@@ -110,6 +124,21 @@ class IncidentEngine:
                 )
             )
 
+        # Extract thread IDs, surfaces, finding IDs
+        thread_ids = sorted(list({e.session_id for e in events if e.session_id}))
+        surfaces = sorted(list({e.details.get("surface") for e in events if e.details.get("surface")}))
+        findings = sorted(list({e.details.get("finding") for e in events if e.details.get("finding")}))
+
+        unknown_fields = []
+        if first_bad:
+            unknown_fields.append("exact_desktop_internal_renderer_state")
+
+        rep_summary = (
+            f"Incident {incident_id} affected {len(thread_ids)} threads across surfaces {surfaces or ['local']}. "
+            f"First anomaly observed at {first_bad}: {first_anomaly}."
+            if first_bad else "All observed operations healthy."
+        )
+
         return IncidentReport(
             incident_id=incident_id,
             start_time=st,
@@ -123,4 +152,11 @@ class IncidentEngine:
             causal_chain=causal,
             canonical_rollout_status="HEALTHY",
             is_safe_shareable=True,
+            affected_logical_thread_ids=thread_ids,
+            surfaces=surfaces,
+            finding_ids=findings,
+            evidence_provenance={"events_recorded": len(events), "anomalies": len(anomalies)},
+            confidence="HIGH" if len(events) > 0 else "UNKNOWN",
+            unknown_fields=unknown_fields,
+            sanitized_reproduction_summary=rep_summary,
         )

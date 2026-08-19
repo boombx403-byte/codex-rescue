@@ -106,6 +106,60 @@ class ReproducerEngine:
         )
 
     @staticmethod
+    def create_windows_divergence_reproducer() -> SyntheticReproducer:
+        """Generates synthetic reproducer for WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE."""
+        records = [
+            SyntheticRecord(
+                record_type="session_meta",
+                ordinal=0,
+                payload_size_bytes=256,
+                details={"stored_path": r"\\?\C:\Users\tester\.codex\sessions\rollout.jsonl", "discovered_path": r"C:\Users\tester\.codex\sessions\rollout.jsonl"},
+            ),
+            SyntheticRecord(
+                record_type="turn",
+                ordinal=1,
+                payload_size_bytes=512,
+                is_malformed=True,
+                details={"finding": "WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE"},
+            ),
+        ]
+        return SyntheticReproducer(
+            reproducer_id="rep_windows_path_divergence",
+            target_finding="WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
+            schema_version=1,
+            total_records=len(records),
+            records=records,
+            expected_failure="WINDOWS_ROLLOUT_PATH_IDENTITY_DIVERGENCE",
+        )
+
+    @staticmethod
+    def create_spawn_edge_reproducer() -> SyntheticReproducer:
+        """Generates synthetic reproducer for STALE_SPAWN_EDGE_PRESENTATION."""
+        records = [
+            SyntheticRecord(
+                record_type="session_meta",
+                ordinal=0,
+                payload_size_bytes=256,
+                details={"thread_id": "thread-123", "parent_id": None},
+            ),
+            SyntheticRecord(
+                record_type="subagent_spawn",
+                ordinal=1,
+                payload_size_bytes=512,
+                is_malformed=True,
+                details={"spawn_edge_status": "CLOSED", "active_marker": False, "finding": "STALE_SPAWN_EDGE_PRESENTATION"},
+            ),
+        ]
+        return SyntheticReproducer(
+            reproducer_id="rep_stale_spawn_edge",
+            target_finding="STALE_SPAWN_EDGE_PRESENTATION",
+            schema_version=1,
+            total_records=len(records),
+            records=records,
+            expected_failure="STALE_SPAWN_EDGE_PRESENTATION",
+        )
+
+    @staticmethod
     def replay(rep: SyntheticReproducer) -> Dict[str, Any]:
         """Replays synthetic reproducer through invariant validation."""
         has_defect = any(r.is_malformed for r in rep.records)
