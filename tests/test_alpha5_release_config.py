@@ -8,8 +8,8 @@ from codex_rescue import __version__
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CURRENT_NPM_META_VERSION = "0.1.0-alpha.6-2"
-CURRENT_PLATFORM_VERSION = "0.1.0-alpha.6"
+CURRENT_NPM_META_VERSION = "0.1.0-alpha.6-3"
+CURRENT_PLATFORM_VERSION = "0.1.0-alpha.6-3"
 PYTHON_VERSION = "0.1.0a6"
 TAG = "v0.1.0-alpha.6"
 
@@ -31,7 +31,7 @@ CURRENT_PLATFORM_PACKAGES = {
         "win32",
         "x64",
         "bin/codex-rescue.exe",
-        ">=0.1.0-alpha.6",
+        CURRENT_PLATFORM_VERSION,
     ),
     "darwin-arm64": (
         "codex-rescue-darwin-arm64",

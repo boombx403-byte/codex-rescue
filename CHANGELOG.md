@@ -2,6 +2,39 @@
 
 All notable changes to Codex Rescue are documented here.
 
+## v0.1.0-alpha.6-3 — Codex Rescue Alpha6 — Field Fix Batches 1–3
+
+### Added / Fixed
+
+#### Batch 1 — Windows Distribution Hardening
+- Windows launcher now prioritizes `codex-rescue-windows-x64`.
+- Historical missing package names no longer block supported fallback resolution.
+- Deterministic fail-closed platform resolution.
+- Zero runtime downloader, zero shell execution, zero Python runtime fallback for npm users.
+
+#### Batch 2 — Windows Thread and Path Identity
+- Detects `C:\...` vs `\\?\C:\...` rollout identity divergence.
+- Distinct classification separating healthy source JSONL from diverged thread-store state.
+- No automatic SQLite database rewrites.
+- Prevents false `ROLLOUT_MISSING` classifications solely from `os error 2`.
+- Canonical real Codex ThreadId parsing from current rollout metadata and filename semantics.
+- Normal and revert filenames distinguished correctly.
+
+#### Batch 3 — Lifecycle and State Truth
+- Reads `thread_spawn_edges` strictly read-only.
+- CLOSED spawn edge without conflicting live runtime is never treated as WORKING.
+- Terminal retained child is not automatically assumed CLOSED.
+- Desktop presentation state is not treated as authoritative runtime truth.
+- Generic archive errors do not fabricate path or reference root causes.
+
+#### Qualification & Reliability
+- Full Linux, Windows, and macOS cross-platform CI qualification.
+- Real Windows extended-path tests executed and passed on Windows runners.
+- Full E2E harness and package build validation.
+- Safe offline HTML report rendering with explicit UNKNOWN identity for unindexed rollouts.
+- Refreshed doctor severity ordering contract for Alpha6 findings.
+- Guaranteed source rollout and SQLite immutability.
+
 ## v0.1.0-alpha.5 — Coordinated release across npm, PyPI, and GitHub standalone binaries
 
 ### Added
