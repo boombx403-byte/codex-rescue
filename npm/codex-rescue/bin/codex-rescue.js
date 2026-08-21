@@ -40,22 +40,49 @@ function missingPackageMessage(platform, arch, target, version = meta.version) {
   );
 }
 
+function missingBinaryPayload(platform, arch, target, version = meta.version) {
+  return {
+    error: 'NATIVE_BINARY_MISSING',
+    platform,
+    arch,
+    checked_packages: target ? [...target.packages] : [],
+    message: target ? missingPackageMessage(platform, arch, target, version) : `Unsupported platform ${platform}/${arch}`,
+  };
+}
+
 function main() {
   const platform = process.platform;
   const arch = process.arch;
   const target = getTarget(platform, arch);
   if (!target) {
-    console.error(`codex-rescue: unsupported platform ${platform}/${arch}; no platform package will be executed.`);
+    console.error(JSON.stringify({
+      error: 'NATIVE_BINARY_MISSING',
+      platform,
+      arch,
+      message: `codex-rescue: unsupported platform ${platform}/${arch}; no platform package will be executed.`,
+    }));
     process.exit(1);
   }
 
   const resolved = resolvePlatformPackage(target);
   if (!resolved) {
-    console.error(missingPackageMessage(platform, arch, target));
+    console.error(JSON.stringify(missingBinaryPayload(platform, arch, target)));
     process.exit(1);
   }
 
+  const fs = require('node:fs');
   const executable = path.join(path.dirname(resolved.packageJson), 'bin', target.executable);
+  if (!fs.existsSync(executable)) {
+    console.error(JSON.stringify({
+      error: 'NATIVE_BINARY_MISSING',
+      platform,
+      arch,
+      executable,
+      message: `codex-rescue: native binary not found at ${executable}`,
+    }));
+    process.exit(1);
+  }
+
   const child = spawn(executable, process.argv.slice(2), {
     stdio: 'inherit',
     shell: false,
@@ -63,8 +90,13 @@ function main() {
   });
 
   child.once('error', (error) => {
-    console.error(`codex-rescue: failed to start platform executable: ${error.message}`);
-    process.exitCode = 1;
+    console.error(JSON.stringify({
+      error: 'NATIVE_BINARY_MISSING',
+      platform,
+      arch,
+      message: `codex-rescue: failed to start platform executable: ${error.message}`,
+    }));
+    process.exit(1);
   });
 
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
@@ -89,6 +121,7 @@ if (require.main === module) {
 
 module.exports = {
   getTarget,
+  missingBinaryPayload,
   missingPackageMessage,
   resolvePlatformPackage,
   targets,

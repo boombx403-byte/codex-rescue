@@ -34,16 +34,12 @@ def detect_path_namespace(p: str | Path) -> PathNamespace:
     return PathNamespace.UNKNOWN
 
 
+from codex_rescue.windows_paths import normalize_windows_extended_path
+
+
 def normalize_canonical_path(p: str | Path) -> str:
     """Safely normalizes path string while preserving underlying identity."""
-    s = str(p).strip()
-    if not s:
-        return ""
-    # Strip long path prefix for canonical comparison if drive letter
-    if s.startswith("\\\\?\\") and len(s) >= 6 and s[5] == ":":
-        s = s[4:]
-    s = s.replace("\\", "/")
-    return os.path.normpath(s).replace("\\", "/")
+    return normalize_windows_extended_path(p)
 
 
 class SurfaceVisibility(str, enum.Enum):

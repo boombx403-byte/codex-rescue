@@ -12,10 +12,51 @@ from codex_rescue.thread_store import (
     classify_rollout_presence,
     inspect_thread_store,
 )
-from codex_rescue.windows_paths import compare_windows_paths, path_identity
+from codex_rescue.windows_paths import (
+    compare_windows_paths,
+    normalize_windows_extended_path,
+    path_identity,
+)
 
 
 class WindowsPathIdentityTests(unittest.TestCase):
+    def test_normalize_windows_extended_path_varieties(self):
+        self.assertEqual(
+            normalize_windows_extended_path(r"\\?\C:\Users\Alice\foo\bar"),
+            "C:/Users/Alice/foo/bar",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path(r"//?/c:/Users/Alice/foo/bar"),
+            "C:/Users/Alice/foo/bar",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path(r"c:\users\alice\foo\bar"),
+            "C:/users/alice/foo/bar",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path(r"\\?\UNC\server\share\foo\bar"),
+            "//server/share/foo/bar",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path(r"//?/UNC/server/share/foo/bar"),
+            "//server/share/foo/bar",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path("/mnt/c/Users/Alice/foo/bar"),
+            "C:/Users/Alice/foo/bar",
+        )
+
+    def test_normalize_windows_extended_path_posix_preservation(self):
+        self.assertEqual(
+            normalize_windows_extended_path("/home/user/project/file.txt"),
+            "/home/user/project/file.txt",
+        )
+        self.assertEqual(
+            normalize_windows_extended_path("/tmp/test/session.jsonl"),
+            "/tmp/test/session.jsonl",
+        )
+        self.assertEqual(normalize_windows_extended_path(""), "")
+
     def test_drive_extended_prefix_forward_is_equivalent(self):
         result = compare_windows_paths(
             r"C:\Users\Alice\.codex\sessions\rollout.jsonl",

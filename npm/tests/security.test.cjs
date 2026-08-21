@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..', '..');
 const launcherPath = path.join(root, 'npm', 'codex-rescue', 'bin', 'codex-rescue.js');
 const launcher = fs.readFileSync(launcherPath, 'utf8');
 const top = JSON.parse(fs.readFileSync(path.join(root, 'npm', 'codex-rescue', 'package.json'), 'utf8'));
-const { getTarget, missingPackageMessage, resolvePlatformPackage, targets } = require(launcherPath);
+const { getTarget, missingBinaryPayload, missingPackageMessage, resolvePlatformPackage, targets } = require(launcherPath);
 
 const platformDirs = ['linux-x64', 'win32-x64', 'darwin-arm64', 'darwin-x64'];
 
@@ -115,4 +115,30 @@ test('manifest topology points only at publishable platform package families', (
     'codex-rescue-windows-x64',
   ]);
   assert.equal(targets['win32-x64'].packages[0], 'codex-rescue-windows-x64');
+});
+
+test('missingBinaryPayload generates valid fail-closed structured JSON payload', () => {
+  const target = getTarget('win32', 'x64');
+  const payload = missingBinaryPayload('win32', 'x64', target, '0.1.0-alpha.6-3');
+  assert.equal(payload.error, 'NATIVE_BINARY_MISSING');
+  assert.equal(payload.platform, 'win32');
+  assert.equal(payload.arch, 'x64');
+  assert.deepEqual(payload.checked_packages, ['codex-rescue-windows-x64', 'codex-rescue-win32-x64']);
+  assert.match(payload.message, /codex-rescue-windows-x64/);
+});
+
+test('launcher execution without native binary exits 1 and emits structured JSON on stderr', (t) => {
+  const { spawnSync } = require('node:child_process');
+  const res = spawnSync(process.execPath, [launcherPath], {
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: '' },
+  });
+  assert.equal(res.status, 1);
+  const errOutput = res.stderr.trim();
+  assert.ok(errOutput.length > 0);
+  const parsed = JSON.parse(errOutput);
+  assert.equal(parsed.error, 'NATIVE_BINARY_MISSING');
+  assert.ok(parsed.platform);
+  assert.ok(parsed.arch);
+  assert.doesNotMatch(res.stderr, /at Object\.<anonymous>|at Module\._compile/);
 });

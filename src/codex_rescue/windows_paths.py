@@ -156,6 +156,70 @@ def compare_windows_paths(
     )
 
 
+import posixpath
+
+
+def normalize_windows_extended_path(path: str | os.PathLike[str]) -> str:
+    """Normalize Windows extended-length, UNC, and POSIX path representations.
+
+    - Strips \\?\\ and //?/ prefixes.
+    - Normalizes \\?\\UNC\\server\\share to //server/share.
+    - Normalizes drive letters to uppercase (e.g., c:/ -> C:/).
+    - Normalizes backslashes to forward slashes.
+    - Normalizes relative components (. and ..).
+    - Preserves standard POSIX paths (e.g. /home/user or /tmp/...) cleanly in Linux/Codespaces environments.
+    """
+    raw = os.fspath(path).strip()
+    if not raw:
+        return ""
+
+    # 1. Check extended UNC: \\?\UNC\server\share\tail or //?/UNC/server/share/tail
+    match_ext_unc = _EXT_UNC_RE.match(raw)
+    if match_ext_unc:
+        server = match_ext_unc.group(1)
+        share = match_ext_unc.group(2)
+        tail = match_ext_unc.group(3) or ""
+        tail_norm = posixpath.normpath(tail.replace("\\", "/")).strip("/")
+        return f"//{server}/{share}/{tail_norm}" if tail_norm and tail_norm != "." else f"//{server}/{share}"
+
+    # 2. Check extended drive: \\?\C:\tail or //?/C:/tail
+    match_ext_drive = _EXT_DRIVE_RE.match(raw)
+    if match_ext_drive:
+        drive = match_ext_drive.group(1).upper()
+        tail = match_ext_drive.group(2).replace("\\", "/")
+        norm_tail = posixpath.normpath(tail).lstrip("/")
+        return f"{drive}:/{norm_tail}" if norm_tail and norm_tail != "." else f"{drive}:/"
+
+    # 3. Check standard UNC: \\server\share\tail or //server/share/tail
+    match_unc = _UNC_RE.match(raw)
+    if match_unc:
+        server = match_unc.group(1)
+        share = match_unc.group(2)
+        tail = match_unc.group(3) or ""
+        tail_norm = posixpath.normpath(tail.replace("\\", "/")).strip("/")
+        return f"//{server}/{share}/{tail_norm}" if tail_norm and tail_norm != "." else f"//{server}/{share}"
+
+    # 4. Check standard drive: C:\tail or c:/tail
+    match_drive = _DRIVE_ABS_RE.match(raw)
+    if match_drive:
+        drive = match_drive.group(1).upper()
+        tail = match_drive.group(2).replace("\\", "/")
+        norm_tail = posixpath.normpath(tail).lstrip("/")
+        return f"{drive}:/{norm_tail}" if norm_tail and norm_tail != "." else f"{drive}:/"
+
+    # 5. Check WSL mount: /mnt/c/tail
+    match_wsl = _WSL_RE.match(raw.replace("\\", "/"))
+    if match_wsl:
+        drive = match_wsl.group(1).upper()
+        tail = match_wsl.group(2)
+        norm_tail = posixpath.normpath(tail).lstrip("/")
+        return f"{drive}:/{norm_tail}" if norm_tail and norm_tail != "." else f"{drive}:/"
+
+    # 6. Pure POSIX / other path
+    normalized = posixpath.normpath(raw.replace("\\", "/"))
+    return normalized
+
+
 def has_windows_namespace_divergence(left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool:
     result = compare_windows_paths(left, right)
     return result.relation == "EQUIVALENT" and result.namespace_divergence
@@ -165,5 +229,6 @@ __all__ = [
     "PathIdentityResult",
     "compare_windows_paths",
     "has_windows_namespace_divergence",
+    "normalize_windows_extended_path",
     "path_identity",
 ]

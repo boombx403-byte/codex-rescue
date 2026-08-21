@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -43,6 +44,7 @@ class StorageHealthReport:
     unreadable_regions: List[Dict[str, Any]] = field(default_factory=list)
     state_db_sizes: Dict[str, int] = field(default_factory=dict)
     scan_truncated: bool = False
+    truncated_by_limit: bool = False
     duration_sec: float = 0.0
     limits: Dict[str, Any] = field(default_factory=dict)
 
@@ -59,6 +61,7 @@ class StorageHealthReport:
             "unreadable_regions": self.unreadable_regions,
             "state_db_sizes": self.state_db_sizes,
             "scan_truncated": self.scan_truncated,
+            "truncated_by_limit": self.truncated_by_limit,
             "duration_sec": self.duration_sec,
             "limits": self.limits,
         }
@@ -70,6 +73,52 @@ class StorageHealthEngine:
     Strictly read-only: does not perform deletions, modifications, or cleanups.
     Does not materialize large JSONL files entirely in memory.
     """
+
+    @staticmethod
+    def scan_oversized_records_streaming(
+        fpath: Path,
+        threshold_bytes: int = 16 * 1024 * 1024,
+        max_scan_bytes: int = 100 * 1024 * 1024,
+    ) -> tuple[int, int]:
+        """Streams up to max_scan_bytes using a 64KB buffer, counting bytes per newline.
+
+        Returns (max_record_bytes, count_of_records_over_threshold).
+        Zero whole-line materialization in memory.
+        """
+        max_record = 0
+        oversized_count = 0
+        current_len = 0
+        total_scanned = 0
+
+        with open(fpath, "rb") as fh:
+            while total_scanned < max_scan_bytes:
+                chunk = fh.read(65536)
+                if not chunk:
+                    break
+                total_scanned += len(chunk)
+                idx = 0
+                while True:
+                    nl_pos = chunk.find(b"\n", idx)
+                    if nl_pos == -1:
+                        current_len += len(chunk) - idx
+                        if current_len > max_record:
+                            max_record = current_len
+                        break
+                    else:
+                        current_len += nl_pos - idx
+                        if current_len > max_record:
+                            max_record = current_len
+                        if current_len >= threshold_bytes:
+                            oversized_count += 1
+                        current_len = 0
+                        idx = nl_pos + 1
+
+        if current_len > max_record:
+            max_record = current_len
+        if current_len >= threshold_bytes:
+            oversized_count += 1
+
+        return max_record, oversized_count
 
     @staticmethod
     def scan_codex_home(
@@ -84,6 +133,7 @@ class StorageHealthEngine:
                 "max_files": lim.max_files,
                 "max_bytes": lim.max_bytes,
                 "large_file_threshold_bytes": lim.large_file_threshold_bytes,
+                "oversized_record_threshold_bytes": lim.oversized_record_threshold_bytes,
                 "timeout_sec": lim.timeout_sec,
             }
         )
@@ -96,7 +146,7 @@ class StorageHealthEngine:
         total_home_bytes = 0
         total_files_scanned = 0
         is_truncated = False
-        seen_filenames: Dict[str, List[str]] = {}
+        seen_hashes: Dict[str, List[str]] = {}
 
         # 1. State databases scan (state_5.sqlite, goals_1.sqlite, logs_2.sqlite, etc.)
         for db_file in codex_home.glob("*.sqlite*"):
@@ -121,7 +171,11 @@ class StorageHealthEngine:
                 for root, _, files in os.walk(str(sdir)):
                     for fname in files:
                         total_files_scanned += 1
-                        if total_files_scanned > lim.max_files or (time.time() - start_t) > lim.timeout_sec:
+                        if (
+                            total_files_scanned > lim.max_files
+                            or total_home_bytes > lim.max_bytes
+                            or (time.time() - start_t) > lim.timeout_sec
+                        ):
                             is_truncated = True
                             break
 
@@ -138,11 +192,18 @@ class StorageHealthEngine:
                                 else:
                                     report.sessions_count += 1
 
-                                # Track physical duplicates
-                                if fname in seen_filenames:
-                                    seen_filenames[fname].append(str(fpath))
-                                else:
-                                    seen_filenames[fname] = [str(fpath)]
+                                # Track physical duplicates by 64KB prefix hash + size
+                                try:
+                                    with open(fpath, "rb") as fh:
+                                        sample = fh.read(65536)
+                                        sample_sha = hashlib.sha256(sample).hexdigest()
+                                        hash_key = f"{sample_sha}:{fsize}"
+                                        if hash_key in seen_hashes:
+                                            seen_hashes[hash_key].append(str(fpath))
+                                        else:
+                                            seen_hashes[hash_key] = [str(fpath)]
+                                except Exception:
+                                    pass
 
                                 # Resolve identity without stem fallback
                                 ident = resolve_thread_identity(fpath)
@@ -159,21 +220,23 @@ class StorageHealthEngine:
                                         )
                                     )
 
-                                # Quick bounded check for oversized records on large files
+                                # Bounded streaming check for oversized records
                                 if fsize >= lim.oversized_record_threshold_bytes:
-                                    # Sample first 64KB without materializing whole file
                                     try:
-                                        with open(fpath, "rb") as fh:
-                                            sample = fh.read(65536)
-                                            if b"\n" not in sample and len(sample) == 65536:
-                                                report.oversized_record_candidates.append(
-                                                    {
-                                                        "filename": fname,
-                                                        "bytes": fsize,
-                                                        "thread_id": ident.thread_id,
-                                                        "estimated_single_record": True,
-                                                    }
-                                                )
+                                        max_rec, over_cnt = StorageHealthEngine.scan_oversized_records_streaming(
+                                            fpath,
+                                            threshold_bytes=lim.oversized_record_threshold_bytes,
+                                        )
+                                        if over_cnt > 0 or max_rec >= lim.oversized_record_threshold_bytes:
+                                            report.oversized_record_candidates.append(
+                                                {
+                                                    "filename": fname,
+                                                    "bytes": fsize,
+                                                    "thread_id": ident.thread_id,
+                                                    "max_record_bytes": max_rec,
+                                                    "oversized_records_count": over_cnt,
+                                                }
+                                            )
                                     except Exception:
                                         pass
                         except OSError as e:
@@ -184,14 +247,22 @@ class StorageHealthEngine:
             except Exception as e:
                 report.unreadable_regions.append({"path": str(sdir), "error": str(e)})
 
-        # Record duplicates
-        for fname, paths in seen_filenames.items():
+        # Record physical duplicate sources sharing prefix hash + size
+        for hkey, paths in seen_hashes.items():
             if len(paths) > 1:
-                report.duplicate_physical_sources.append({"filename": fname, "paths": paths})
+                h_sha, h_bytes = hkey.split(":")
+                report.duplicate_physical_sources.append(
+                    {
+                        "prefix_sha256": h_sha,
+                        "bytes": int(h_bytes),
+                        "paths": paths,
+                    }
+                )
 
         report.codex_home_bytes = total_home_bytes
         report.codex_home_bytes_status = "ESTIMATED" if is_truncated else "MEASURED"
         report.scan_truncated = is_truncated
+        report.truncated_by_limit = is_truncated
         report.duration_sec = round(time.time() - start_t, 3)
 
         return report
