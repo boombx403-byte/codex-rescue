@@ -200,6 +200,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     slim_p.add_argument("--json", action="store_true")
 
+    recover_p = subs.add_parser(
+        "recover",
+        help="Salvage rows from a corrupted Codex SQLite store into a fresh copy",
+    )
+    recover_p.add_argument("database", type=Path, help="Path to the damaged .sqlite file")
+    recover_p.add_argument(
+        "--write",
+        action="store_true",
+        help="Write <name>.recovered.sqlite (default: dry-run diagnosis only)",
+    )
+    recover_p.add_argument("--out", type=Path, help="Custom recovered-copy path")
+    recover_p.add_argument("--json", action="store_true")
+
     ws_p = subs.add_parser("workspace", help="Inspect saved vs current workspace environment")
     ws_p.add_argument("session", nargs="?", type=Path)
     ws_p.add_argument("--latest", action="store_true")
@@ -648,6 +661,22 @@ def main(argv: list[str] | None = None) -> int:
                 "\nDry-run only: re-run with --write to keep the slim fork.",
                 file=sys.stderr,
             )
+        return int(ExitCode.SUCCESS)
+
+    if args.command == "recover":
+        from .sqlite_recover import recover_sqlite
+
+        rv_res = recover_sqlite(
+            args.database,
+            write=bool(args.write),
+            recovered_path=args.out,
+        )
+        if args.json:
+            _json(rv_res.to_dict(), command="recover", status=rv_res.method.upper())
+        else:
+            print(rv_res.render_text())
+        if not rv_res.write_performed:
+            return int(ExitCode.WARNINGS_FOUND)
         return int(ExitCode.SUCCESS)
 
     if args.command == "workspace":
