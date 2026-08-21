@@ -210,6 +210,11 @@ def main(argv: list[str] | None = None) -> int:
     writer_p.add_argument("session", nargs="?", type=Path)
     writer_p.add_argument("--latest", action="store_true")
     writer_p.add_argument("--codex-home", type=Path)
+    writer_p.add_argument(
+        "--fix",
+        action="store_true",
+        help="Remove a stale lock (dead/unresolvable owner only); timestamped backup kept",
+    )
     writer_p.add_argument("--json", action="store_true")
 
     plan_p = subs.add_parser("plan", help="Generate structured recovery plan for session")
@@ -662,6 +667,21 @@ def main(argv: list[str] | None = None) -> int:
         if session_path is None:
             print("Error: writer requires a valid session path or --latest", file=sys.stderr)
             return int(ExitCode.INVALID_INPUT)
+        if getattr(args, "fix", False):
+            from .stale_lock import fix_stale_writer_lock
+
+            sl_res = fix_stale_writer_lock(
+                session_path, codex_home=args.codex_home, remove=True
+            )
+            if args.json:
+                _json(sl_res.to_dict(), command="writer --fix", status=sl_res.action_taken.upper())
+            else:
+                print(sl_res.render_text())
+            if sl_res.action_taken == "refused_live":
+                return int(ExitCode.WARNINGS_FOUND)
+            if sl_res.action_taken in ("removed", "nothing_stale"):
+                return int(ExitCode.SUCCESS)
+            return int(ExitCode.WARNINGS_FOUND)
         wr_res = inspect_writer(session_path, codex_home=args.codex_home)
         if args.json:
             _json(wr_res.to_dict(), command="writer", status="ACTIVE_WRITER" if wr_res.lock_present and wr_res.owner_process_alive else "INACTIVE", session=wr_res.session_id)
