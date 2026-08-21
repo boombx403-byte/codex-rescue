@@ -181,6 +181,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     reconcile_p.add_argument("--json", action="store_true")
 
+    slim_p = subs.add_parser(
+        "slim",
+        help="Build a media-deduplicated clean fork of an inflated rollout",
+    )
+    slim_p.add_argument("session", nargs="?", type=Path)
+    slim_p.add_argument("--latest", action="store_true")
+    slim_p.add_argument("--codex-home", type=Path)
+    slim_p.add_argument(
+        "--out",
+        type=Path,
+        help="Fork output path (default: <source>.slim.jsonl next to the source)",
+    )
+    slim_p.add_argument(
+        "--write",
+        action="store_true",
+        help="Keep the fork file (default: dry-run measurement only)",
+    )
+    slim_p.add_argument("--json", action="store_true")
+
     ws_p = subs.add_parser("workspace", help="Inspect saved vs current workspace environment")
     ws_p.add_argument("session", nargs="?", type=Path)
     ws_p.add_argument("--latest", action="store_true")
@@ -597,6 +616,31 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "\nDry-run only: re-run with --write to apply these changes "
                 "(timestamped backups are created automatically).",
+                file=sys.stderr,
+            )
+        return int(ExitCode.SUCCESS)
+
+    if args.command == "slim":
+        from .slim import slim_rollout
+
+        session_path = _resolve_session(args.session, args.latest, args.codex_home)
+        if session_path is None:
+            print("Error: slim requires a valid session path or --latest", file=sys.stderr)
+            return int(ExitCode.INVALID_INPUT)
+        sl_res = slim_rollout(
+            session_path,
+            fork_path=args.out,
+            keep_fork=bool(args.write),
+        )
+        if args.json:
+            _json(sl_res.to_dict(), command="slim", status="SUCCESS")
+        else:
+            print(sl_res.render_text())
+        if sl_res.errors:
+            return int(ExitCode.WARNINGS_FOUND)
+        if not sl_res.write_performed and sl_res.bytes_saved > 0:
+            print(
+                "\nDry-run only: re-run with --write to keep the slim fork.",
                 file=sys.stderr,
             )
         return int(ExitCode.SUCCESS)
