@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .discovery_alpha5 import discover_sessions
+from .discovery import _rollout_paths
 from .doctor import doctor_session
 from .evidence import collect_session_evidence
 from .redact import sanitize_path
@@ -90,12 +90,43 @@ def run_doctor_all(
     if not home.exists():
         return summary
 
+    # Fix: use recursive enumeration (rglob) so date-subdir rollouts and
+    # any nested sessions are not silently skipped by the old
+    # sessions/*.jsonl shallow glob (the RuriLothlorien gap). Keep the scan
+    # inventory-agnostic via filesystem walk — doctor_session itself already
+    # joins the SQLite thread_store via path_identity, so \\?\C:\... diverged
+    # rows are surfaced when the on-disk file is visited.
     session_paths: list[Path] = []
-    for pat in ("sessions/*.jsonl", "archived_sessions/*.jsonl", "subagents/*.jsonl", "*.jsonl"):
-        session_paths.extend(home.glob(pat))
+    for sub in ("sessions", "archived_sessions", "subagents"):
+        base = home / sub
+        if base.is_dir():
+            try:
+                session_paths.extend(base.rglob("*.jsonl"))
+            except OSError:
+                continue
+    try:
+        session_paths.extend(home.glob("*.jsonl"))
+    except OSError:
+        pass
 
-    unique_paths = sorted(list({p.resolve() for p in session_paths}))[:limit]
+    # Canonical rollout discovery (handles archived flag / nested layout)
+    # deduped with the generic walk above so both rollout-*.jsonl and
+    # test fixtures like session_1.jsonl are covered.
+    try:
+        for p in _rollout_paths(home, include_archived=True):
+            session_paths.append(p)
+    except Exception:
+        pass
 
+    seen: dict[Path, bool] = {}
+    for p in session_paths:
+        try:
+            rp = p.resolve()
+        except OSError:
+            rp = p
+        if rp not in seen:
+            seen[rp] = True
+    unique_paths = sorted(seen.keys(), key=lambda x: str(x))[:limit]
     for p in unique_paths:
         summary.sessions_scanned += 1
         try:
@@ -152,11 +183,31 @@ def run_doctor_changed(
 
     summary = BatchDoctorSummary()
     session_paths: list[Path] = []
-    if home.exists():
-        for pat in ("sessions/*.jsonl", "archived_sessions/*.jsonl", "subagents/*.jsonl", "*.jsonl"):
-            session_paths.extend(home.glob(pat))
-
-    unique_paths = sorted(list({p.resolve() for p in session_paths}))
+    for sub in ("sessions", "archived_sessions", "subagents"):
+        base = home / sub
+        if base.is_dir():
+            try:
+                session_paths.extend(base.rglob("*.jsonl"))
+            except OSError:
+                continue
+    try:
+        session_paths.extend(home.glob("*.jsonl"))
+    except OSError:
+        pass
+    try:
+        for p in _rollout_paths(home, include_archived=True):
+            session_paths.append(p)
+    except Exception:
+        pass
+    seen2: dict[Path, bool] = {}
+    for p in session_paths:
+        try:
+            rp = p.resolve()
+        except OSError:
+            rp = p
+        if rp not in seen2:
+            seen2[rp] = True
+    unique_paths = sorted(seen2.keys(), key=lambda x: str(x))
     new_cache: dict[str, Any] = {}
     now = time.time()
 
