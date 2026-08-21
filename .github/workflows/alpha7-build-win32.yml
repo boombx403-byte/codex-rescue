@@ -1,4 +1,4 @@
-name: Build Alpha6 Windows Package
+name: Build Alpha7 Windows Package
 
 on:
   workflow_dispatch:
@@ -60,7 +60,7 @@ jobs:
 
       - name: Audit windows-x64 npm tarball
         run: |
-          python scripts/audit_npm_tarball.py build/tarballs/codex-rescue-windows-x64-0.1.0-alpha.6-3.tgz --kind platform
+          python scripts/audit_npm_tarball.py build/tarballs/codex-rescue-windows-x64-0.1.0-alpha.7.tgz --kind platform
 
       - name: Upload Windows package artifact
         uses: actions/upload-artifact@v4
@@ -68,4 +68,4 @@ jobs:
           name: windows-x64-package
           path: |
             dist/codex-rescue.exe
-            build/tarballs/codex-rescue-windows-x64-0.1.0-alpha.6-3.tgz
+            build/tarballs/codex-rescue-windows-x64-0.1.0-alpha.7.tgz
