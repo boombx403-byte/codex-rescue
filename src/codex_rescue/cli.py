@@ -159,6 +159,28 @@ def main(argv: list[str] | None = None) -> int:
     schema_p.add_argument("--codex-home", type=Path)
     schema_p.add_argument("--json", action="store_true")
 
+    reconcile_p = subs.add_parser(
+        "reconcile",
+        help="Plan or apply safe derived-state repairs (backups + transactional writes)",
+    )
+    reconcile_p.add_argument("--codex-home", type=Path)
+    reconcile_p.add_argument(
+        "--write",
+        action="store_true",
+        help="Apply planned changes (default: dry-run plan only)",
+    )
+    reconcile_p.add_argument(
+        "--no-extended-paths",
+        action="store_true",
+        help="Skip \\\\?\\ extended-length rollout_path normalization",
+    )
+    reconcile_p.add_argument(
+        "--no-wsl-cwd",
+        action="store_true",
+        help="Skip WSL /mnt/<drive> cwd translation",
+    )
+    reconcile_p.add_argument("--json", action="store_true")
+
     ws_p = subs.add_parser("workspace", help="Inspect saved vs current workspace environment")
     ws_p.add_argument("session", nargs="?", type=Path)
     ws_p.add_argument("--latest", action="store_true")
@@ -554,6 +576,30 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(sc_res.render_text())
         return int(ExitCode.SUCCESS if sc_res.status == "SUPPORTED" else ExitCode.INCOMPLETE_OR_UNSUPPORTED)
+
+    if args.command == "reconcile":
+        from .reconcile import reconcile_codex_home
+
+        rc_res = reconcile_codex_home(
+            codex_home=args.codex_home,
+            write=bool(args.write),
+            fix_extended_paths=not args.no_extended_paths,
+            fix_wsl_cwd=not args.no_wsl_cwd,
+        )
+        status = "SUCCESS" if not rc_res.errors else "PARTIAL"
+        if args.json:
+            _json(rc_res.to_dict(), command="reconcile", status=status)
+        else:
+            print(rc_res.render_text())
+        if rc_res.errors:
+            return int(ExitCode.WARNINGS_FOUND)
+        if rc_res.changes and not rc_res.write_performed:
+            print(
+                "\nDry-run only: re-run with --write to apply these changes "
+                "(timestamped backups are created automatically).",
+                file=sys.stderr,
+            )
+        return int(ExitCode.SUCCESS)
 
     if args.command == "workspace":
         session_path = _resolve_session(args.session, args.latest, args.codex_home)
