@@ -342,7 +342,7 @@ class RealAppServerClient:
             )
             return res if isinstance(res, dict) else None
         except JsonRpcError as e:
-            if e.code in (-32600, -32602, 404):
+            if e.code in (-32600, -32601, -32602, 404):
                 return None
             raise
 
@@ -404,11 +404,26 @@ class AppServerAdapter:
                     error_code="NOT_FOUND",
                     notes="Thread not found in App Server store",
                 )
+            except JsonRpcError as e:
+                err_code = "COMPACTION_NOT_SUPPORTED" if e.code in (-32601, 404) else "ENDPOINT_UNAVAILABLE"
+                return SurfaceObservation(
+                    surface="app_server",
+                    visibility=SurfaceVisibility.UNSUPPORTED,
+                    error_code=err_code,
+                    notes=f"App server RPC returned {e.code}: {e.message}",
+                )
+            except (TimeoutError, OSError) as e:
+                return SurfaceObservation(
+                    surface="app_server",
+                    visibility=SurfaceVisibility.UNSUPPORTED,
+                    error_code="ENDPOINT_UNAVAILABLE",
+                    notes=str(e),
+                )
             except Exception as e:
                 return SurfaceObservation(
                     surface="app_server",
                     visibility=SurfaceVisibility.INACCESSIBLE,
-                    error_code="RPC_ERROR",
+                    error_code="ENDPOINT_UNAVAILABLE",
                     notes=str(e),
                 )
 

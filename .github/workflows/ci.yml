@@ -18,6 +18,8 @@ jobs:
   core:
     name: core (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +42,8 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall -q src
+        env:
+          PYTHONPATH: src
 
       - name: CLI smoke test
         run: |
@@ -62,6 +66,8 @@ jobs:
   qualification:
     name: Alpha5 qualification
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: core
 
     steps:

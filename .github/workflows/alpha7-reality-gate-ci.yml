@@ -18,6 +18,8 @@ jobs:
   reality-gate:
     name: Alpha7 Qualification (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +47,8 @@ jobs:
       - name: Python Compileall
         run: |
           python -m compileall -q src tests scripts
+        env:
+          PYTHONPATH: src
 
       - name: Main Python Test Suite
         run: |

@@ -201,6 +201,31 @@ class StreamSalvageEngine:
             source_status=scan_result.source_status,
         )
 
+    def salvage_forensic_session(
+        self,
+        source_path: Path,
+        target_path: Path,
+        recovered_tail_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> SalvageManifest:
+        """Forensically salvages valid records and safely appends recovered tail events (e.g. lost_tail_after_compaction).
+
+        Strictly read-only on source_path; writes output exclusively to target_path.
+        """
+        manifest = self.salvage_to_target(source_path, target_path)
+        if recovered_tail_events:
+            additional_bytes = 0
+            additional_records = 0
+            with open(target_path, "a", encoding="utf-8") as dst:
+                for event in recovered_tail_events:
+                    line = json.dumps(event, ensure_ascii=False) + "\n"
+                    dst.write(line)
+                    additional_bytes += len(line.encode("utf-8"))
+                    additional_records += 1
+            manifest.salvaged_bytes += additional_bytes
+            manifest.valid_records_count += additional_records
+            manifest.target_sha256 = compute_file_sha256_streaming(target_path)
+        return manifest
+
 
 @dataclass
 class SalvageManifest:
