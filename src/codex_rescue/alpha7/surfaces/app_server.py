@@ -342,7 +342,10 @@ class RealAppServerClient:
             )
             return res if isinstance(res, dict) else None
         except JsonRpcError as e:
-            if e.code in (-32600, -32601, -32602, 404):
+            # Keep -32600/-32602 swallowed as "not a thread I can identify here".
+            # Let 404 and -32601 propagate so the adapter can classify them as
+            # COMPACTION_NOT_SUPPORTED instead of silently reporting NOT_FOUND.
+            if e.code in (-32600, -32602):
                 return None
             raise
 

@@ -218,26 +218,37 @@ class DesktopAdapter:
                 if proc.returncode != 0:
                     return ProcessProbeResult(status=ProbeOutcome.ERROR, error=f"ps returned {proc.returncode}: {proc.stderr}")
 
+                own_pid = os.getpid()
                 for line in proc.stdout.splitlines():
                     parts = line.strip().split(None, 2)
                     if len(parts) >= 2 and parts[0].isdigit():
                         pid = int(parts[0])
+                        if pid == own_pid:
+                            continue
+                        # comm is truncated to 16 chars on macOS, so key on exact
+                        # command-line signals instead of loose substring matching.
                         comm = parts[1].lower()
                         args = parts[2].lower() if len(parts) > 2 else ""
+                        argv0 = args.split(None, 1)[0] if args else ""
+                        argv0_base = argv0.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
 
-                        if "codex" in comm or "codex" in args:
-                            # Filter out ourselves (e.g. pytest or python runner)
-                            if "python" in comm and "codex_rescue" in args:
-                                continue
-                            res_pids.append(pid)
-                            if "app-server" in args:
-                                app_server_pids.append(pid)
-                            elif "electron" in args or "codex-desktop" in comm:
-                                desktop_pids.append(pid)
-                            elif comm == "codex" or "codex-cli" in args:
-                                cli_pids.append(pid)
-                            else:
-                                unknown_pids.append(pid)
+                        is_rescue_runtime = "codex_rescue" in args or "codex-rescue" in args
+                        is_codex_binary = (
+                            comm.startswith("codex")
+                            or argv0_base in ("codex", "codex-cli", "codex-desktop")
+                        )
+                        if is_rescue_runtime or not (is_codex_binary or ("codex" in comm or "codex" in args)):
+                            continue
+
+                        res_pids.append(pid)
+                        if "app-server" in args:
+                            app_server_pids.append(pid)
+                        elif "electron" in args or "codex-desktop" in comm:
+                            desktop_pids.append(pid)
+                        elif comm.startswith("codex") or "codex-cli" in args:
+                            cli_pids.append(pid)
+                        else:
+                            unknown_pids.append(pid)
             else:
                 return ProcessProbeResult(status=ProbeOutcome.UNSUPPORTED, error=f"Unsupported OS platform: {system}")
 

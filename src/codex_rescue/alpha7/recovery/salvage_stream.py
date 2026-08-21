@@ -216,6 +216,16 @@ class StreamSalvageEngine:
             additional_bytes = 0
             additional_records = 0
             with open(target_path, "a", encoding="utf-8") as dst:
+                marker = {
+                    "type": "rescue_recovered_tail",
+                    "payload": {
+                        "provenance": "codex-rescue-forensic-salvage",
+                        "recovered_records": len(recovered_tail_events),
+                    },
+                }
+                marker_line = json.dumps(marker, ensure_ascii=False) + "\n"
+                dst.write(marker_line)
+                additional_bytes += len(marker_line.encode("utf-8"))
                 for event in recovered_tail_events:
                     line = json.dumps(event, ensure_ascii=False) + "\n"
                     dst.write(line)

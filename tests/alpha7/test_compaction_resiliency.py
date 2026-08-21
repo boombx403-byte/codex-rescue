@@ -89,11 +89,13 @@ class CompactionResiliencyTests(unittest.TestCase):
             # 1. Source file is untouched (Zero In-Place Mutation)
             self.assertEqual(src_file.read_bytes(), orig_src_content)
 
-            # 2. Target file contains all original valid prefix plus recovered tail
+            # 2. Target file contains all original valid prefix plus provenance marker plus recovered tail
             self.assertTrue(tgt_file.exists())
             self.assertEqual(manifest.valid_records_count, len(lines) + len(recovered_tail))
             tgt_lines = [json.loads(line) for line in tgt_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(len(tgt_lines), 4)
+            self.assertEqual(len(tgt_lines), 5)
+            self.assertEqual(tgt_lines[2]["type"], "rescue_recovered_tail")
+            self.assertEqual(tgt_lines[2]["payload"]["provenance"], "codex-rescue-forensic-salvage")
             self.assertEqual(tgt_lines[-1]["payload"]["message"], "continue")
 
 

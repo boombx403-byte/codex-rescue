@@ -37,7 +37,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install build dependencies
         run: |
@@ -63,8 +63,9 @@ jobs:
           PYTHONPATH: src
 
       - name: NPM Launcher and Package Tests
+        working-directory: npm
         run: |
-          node --test npm/tests/*.test.cjs
+          node --test
 
       - name: Build Wheel and Source Distribution
         run: |
