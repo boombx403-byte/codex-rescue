@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 
-EXPECTED_VERSION = "0.1.0-alpha.6-3"
+EXPECTED_VERSION = "0.1.0-alpha.7"
 
 
 def main() -> int:

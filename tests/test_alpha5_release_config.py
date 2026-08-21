@@ -8,10 +8,10 @@ from codex_rescue import __version__
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CURRENT_NPM_META_VERSION = "0.1.0-alpha.6-3"
-CURRENT_PLATFORM_VERSION = "0.1.0-alpha.6-3"
-PYTHON_VERSION = "0.1.0a6"
-TAG = "v0.1.0-alpha.6"
+CURRENT_NPM_META_VERSION = "0.1.0-alpha.7"
+CURRENT_PLATFORM_VERSION = "0.1.0-alpha.7"
+PYTHON_VERSION = "0.1.0a7"
+TAG = "v0.1.0-alpha.7"
 
 ALPHA5_NPM_VERSION = "0.1.0-alpha.5"
 ALPHA5_PYTHON_VERSION = "0.1.0a5"

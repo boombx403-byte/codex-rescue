@@ -42,13 +42,13 @@ test('launcher has no runtime downloader, Python bootstrap, npm mutation, or she
 test('top package uses an explicit content allowlist and no lifecycle scripts', () => {
   assert.deepEqual(top.files.sort(), ['README.md', 'bin/codex-rescue.js'].sort());
   assert.equal(top.scripts, undefined);
-  assert.ok(top.version.startsWith('0.1.0-alpha.6'));
+  assert.ok(top.version.startsWith('0.1.0-alpha.7'));
 });
 
 test('platform packages are restricted and script-free', () => {
   for (const directory of platformDirs) {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'npm', 'platforms', directory, 'package.json'), 'utf8'));
-    assert.equal(pkg.version, '0.1.0-alpha.6-3');
+    assert.equal(pkg.version, '0.1.0-alpha.7');
     assert.equal(pkg.scripts, undefined);
     assert.equal(pkg.os.length, 1);
     assert.equal(pkg.cpu.length, 1);
@@ -73,10 +73,10 @@ test('Windows x64 missing packages fail deterministically and report checked can
   const target = getTarget('win32', 'x64');
   const resolved = resolvePlatformPackage(target, syntheticResolver(new Set()));
   assert.equal(resolved, null);
-  const message = missingPackageMessage('win32', 'x64', target, '0.1.0-alpha.6-3');
+  const message = missingPackageMessage('win32', 'x64', target, '0.1.0-alpha.7');
   assert.match(message, /win32\/x64/);
   assert.match(message, /codex-rescue-windows-x64, codex-rescue-win32-x64/);
-  assert.match(message, /codex-rescue@0\.1\.0-alpha\.6-3/);
+  assert.match(message, /codex-rescue@0\.1\.0-alpha\.7/);
   assert.doesNotMatch(message, /Alpha5 prerelease/);
 });
 
@@ -106,7 +106,7 @@ test('unsupported or malformed platform keys fail closed', () => {
 });
 
 test('manifest topology points only at publishable platform package families', () => {
-  assert.equal(top.optionalDependencies['codex-rescue-windows-x64'], '0.1.0-alpha.6-3');
+  assert.equal(top.optionalDependencies['codex-rescue-windows-x64'], '0.1.0-alpha.7');
   assert.equal(top.optionalDependencies['codex-rescue-win32-x64'], undefined);
   assert.deepEqual(Object.keys(top.optionalDependencies).sort(), [
     'codex-rescue-darwin-arm64',
@@ -119,7 +119,7 @@ test('manifest topology points only at publishable platform package families', (
 
 test('missingBinaryPayload generates valid fail-closed structured JSON payload', () => {
   const target = getTarget('win32', 'x64');
-  const payload = missingBinaryPayload('win32', 'x64', target, '0.1.0-alpha.6-3');
+  const payload = missingBinaryPayload('win32', 'x64', target, '0.1.0-alpha.7');
   assert.equal(payload.error, 'NATIVE_BINARY_MISSING');
   assert.equal(payload.platform, 'win32');
   assert.equal(payload.arch, 'x64');

@@ -2,6 +2,48 @@
 
 All notable changes to Codex Rescue are documented here.
 
+## v0.1.0-alpha.7 — Codex Rescue Alpha7 — Reality Gate Hardening
+
+### Added
+
+#### Autopilot & Surface Routing
+- New `auto` command: unified autopilot controller across CLI, Desktop and IDE
+  surfaces with explicit `--repair-safe` and `--yes` confirmation gates.
+- New `desktop` command: Codex Desktop status, doctor, sessions, diff, paths,
+  writer and logs inspection.
+- New `self-test` command: capability, environment, privacy-engine and
+  trust-verdict self-test.
+
+#### Local Incident Intelligence
+- Blackbox real-state observer poller and desktop multi-DB state adapter.
+- Real app-server JSON-RPC 2.0 protocol client and stdio lifecycle.
+- Incident trust now fails closed; presentation state is never treated as
+  authoritative runtime truth.
+
+#### Disaster Recovery Primitives
+- Transactional derived-state recovery engine.
+- Portable migration roundtrip and derived index reconstruction.
+- New `portable` command (export / inspect / import with `--dry-run`).
+- New `compatibility`, `share` and `simulate-plan` commands.
+
+#### Scale & Storage Qualification
+- Bounded storage health diagnostics and streaming storage profiling.
+- Peak RSS monitoring under large-file stress.
+
+### Fixed
+- Compaction 404 resiliency and forensic tail salvage.
+- Canonical thread identity enforced everywhere.
+- Windows extended-path normalization and npm launcher error handling.
+- Writer probes no longer match Rescue itself.
+- Blocked unverified portable import and mutation.
+
+### Qualification
+- Full Linux, Windows and macOS cross-platform CI qualification (Alpha7
+  Reality Gate CI) across Python 3.11 and 3.13.
+- 321-test main suite, 113-test Alpha7 laboratory suite, 13 npm launcher
+  security tests, 6/6 fixture harness and 100-case E2E harness all green.
+- Guaranteed source rollout and SQLite immutability (Invariant P1).
+
 ## v0.1.0-alpha.6-3 — Codex Rescue Alpha6 — Field Fix Batches 1–3
 
 ### Added / Fixed

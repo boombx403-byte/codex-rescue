@@ -20,7 +20,7 @@ class ExitCode(enum.IntEnum):
 @dataclass
 class Envelope:
     schema_version: int = SCHEMA_VERSION
-    tool_version: str = "0.1.0a6.dev"
+    tool_version: str = "0.1.0a7.dev"
     command: str = ""
     status: str = "SUCCESS"
     session: str | None = None

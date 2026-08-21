@@ -16,7 +16,7 @@
 </p>
 
 [![Release](https://img.shields.io/github/v/release/shleder/codex-rescue?include_prereleases&label=release&color=blue&style=flat-square)](https://github.com/shleder/codex-rescue/releases)
-[![npm version](https://img.shields.io/badge/npm-v0.1.0--alpha.6--3-brightgreen?style=flat-square)](https://www.npmjs.com/package/codex-rescue)
+[![npm version](https://img.shields.io/badge/npm-v0.1.0--alpha.7-brightgreen?style=flat-square)](https://www.npmjs.com/package/codex-rescue)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/shleder/codex-rescue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Zero Telemetry](https://img.shields.io/badge/telemetry-zero%20%2F%20local--first-success?style=flat-square)](https://github.com/shleder/codex-rescue)
@@ -98,6 +98,13 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
 | `report` | **Offline HTML** | Produces a clean, standalone offline HTML diagnostic dashboard. |
 | `salvage` | **Safe Forking** | Extracts durable history into a clean recovery fork (`--fork`). |
 | `verify` | **Handoff Check** | Verifies recovery artifacts and repository HEAD before continuation. |
+| `auto` | **Autopilot** | Alpha7 unified autopilot controller across CLI/desktop/IDE surfaces (`--repair-safe`, `--yes`). |
+| `self-test` | **Capability Check** | Runs Rescue capability, environment, privacy-engine and trust-verdict self-test. |
+| `desktop` | **Desktop Inspection** | Codex Desktop status, doctor, sessions, diff, paths, writer and logs inspection. |
+| `compatibility` | **Compat Matrix** | Inspects schema and runtime compatibility across rollout/SQLite generations. |
+| `portable` | **Portable Packages** | Export, inspect and import portable session packages (`--dry-run` supported). |
+| `share` | **Safe Share Report** | Generates a privacy-redacted diagnostic share report. |
+| `simulate-plan` | **Plan Sandbox** | Simulates a recovery plan in a temporary sandbox without touching source data. |
 
 ---
 
@@ -123,6 +130,29 @@ Codex Rescue inspects local OpenAI Codex session rollouts (`.jsonl`), correlates
   * `darwin-arm64` (Apple Silicon)
   * `darwin-x64` (Intel macOS)
 * Zero runtime downloads, zero `curl | sh`, zero `shell: true`, and zero Python requirements for npm users.
+
+---
+
+## Alpha7: Reality Gate Hardening
+
+Alpha7 is the "reality gate" milestone: every diagnostic claim is now grounded in
+observable local evidence, and every unsafe path fails closed.
+
+* **Unified Autopilot** (`auto`): single controller that routes across CLI,
+  Desktop and IDE surfaces with explicit `--repair-safe` confirmation gates.
+* **Local Incident Intelligence**: blackbox real-state observer, desktop
+  multi-DB state adapter, and process tracking — presentation state is never
+  treated as authoritative runtime truth.
+* **Disaster Recovery Primitives**: transactional derived-state recovery
+  engine, portable migration roundtrip, and derived index reconstruction.
+* **Trust Contracts**: privacy engine and trust verdicts in `self-test`;
+  incident trust fails closed; unverified portable import and mutation are
+  blocked.
+* **Scale Qualification**: bounded storage health diagnostics, streaming
+  storage profiling, and peak RSS monitoring under large-file stress.
+* **Resilience Fixes**: compaction 404 resiliency, forensic tail salvage,
+  canonical thread identity everywhere, Windows extended-path normalization,
+  and writer probes that never match Rescue itself.
 
 ---
 
@@ -188,7 +218,7 @@ codex-rescue report --latest -o report.html
 |---|---|---|---|
 | **npm (npx)** | `codex-rescue` | **Active** | `npx --yes codex-rescue doctor --latest` |
 | **npm (global)** | `codex-rescue` | **Active** | `npm install -g codex-rescue` |
-| **GitHub Releases** | `v0.1.0-alpha.6-3` | **Active** | [Download Release Assets](https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha.6-3) |
+| **GitHub Releases** | `v0.1.0-alpha.7` | **Active** | [Download Release Assets](https://github.com/shleder/codex-rescue/releases/tag/v0.1.0-alpha.7) |
 
 ---
 
