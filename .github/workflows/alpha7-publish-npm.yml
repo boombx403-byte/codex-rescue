@@ -84,6 +84,18 @@ jobs:
         run: |
           set -euo pipefail
           identity="$(npm whoami)"
+          wait_for_version() {
+            local pkg="$1"
+            for attempt in $(seq 1 12); do
+              if [ "$(npm view "${pkg}@${EXPECTED_NPM_VERSION}" version 2>/dev/null)" = "${EXPECTED_NPM_VERSION}" ]; then
+                return 0
+              fi
+              echo "Waiting for npm CDN replication of ${pkg}@${EXPECTED_NPM_VERSION} (attempt ${attempt}/12)..."
+              sleep 10
+            done
+            echo "ERROR: ${pkg}@${EXPECTED_NPM_VERSION} not visible on npm registry after 120s" >&2
+            return 1
+          }
           PLATFORMS=(
             "codex-rescue-linux-x64"
             "codex-rescue-windows-x64"
@@ -98,7 +110,7 @@ jobs:
               echo "Publishing platform package: $tarball"
               npm publish "$tarball" --access public --tag next
             fi
-            test "$(npm view "${pkg}@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
+            wait_for_version "$pkg"
           done
           echo "All platform packages published and verified on npm registry."
 
@@ -114,6 +126,13 @@ jobs:
             echo "Publishing top-level package: $tarball"
             npm publish "$tarball" --access public --tag next
           fi
+          for attempt in $(seq 1 12); do
+            if [ "$(npm view "codex-rescue@${EXPECTED_NPM_VERSION}" version 2>/dev/null)" = "${EXPECTED_NPM_VERSION}" ]; then
+              break
+            fi
+            echo "Waiting for npm CDN replication of codex-rescue@${EXPECTED_NPM_VERSION} (attempt ${attempt}/12)..."
+            sleep 10
+          done
           test "$(npm view "codex-rescue@${EXPECTED_NPM_VERSION}" version)" = "${EXPECTED_NPM_VERSION}"
           echo "Top-level package published and verified on npm registry."
 
